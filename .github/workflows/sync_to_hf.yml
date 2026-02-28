@@ -1,4 +1,5 @@
 name: Sync to Hugging Face Hub
+
 on:
   push:
     branches: [main]
@@ -9,11 +10,22 @@ jobs:
   sync-to-hub:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v3
+      - name: Checkout code
+        uses: actions/checkout@v3
         with:
           fetch-depth: 0
-          lfs: true
+          lfs: true # Ensures the actual .pth file is downloaded, not just the pointer
+
+      - name: Install Git LFS
+        run: git lfs install
+
       - name: Push to hub
         env:
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
-        run: git push --force https://itspriyambhattacharya:$HF_TOKEN@huggingface.co/spaces/itspriyambhattacharya/DeepScan main
+        run: |
+          # Configure Git to use the token for the Hugging Face remote
+          git remote add hf https://itspriyambhattacharya:$HF_TOKEN@huggingface.co/spaces/itspriyambhattacharya/DeepScan
+
+          # Force push the main branch to Hugging Face
+          # We use the -u flag to track the remote and ensure LFS objects are pushed
+          git push --force hf main
