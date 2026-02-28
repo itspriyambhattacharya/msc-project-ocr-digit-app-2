@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 from torchvision import datasets, transforms
-from torch.utils.data import DataLoader
+from torch.utils.data import DataLoader, ConcatDataset
 from PIL import Image, ImageOps
 import os
 
@@ -45,11 +45,33 @@ val_tf = transforms.Compose([
     transforms.Normalize((0.5,), (0.5,))
 ])
 
-train_ds = datasets.ImageFolder("data/custom/train", transform=train_tf)
+# Load original training dataset
+original_train_ds = datasets.ImageFolder(
+    "data/custom/train", transform=train_tf)
+
+# Load feedback dataset (if exists and not empty)
+feedback_path = "data/live_feedback"
+
+if os.path.exists(feedback_path) and len(os.listdir(feedback_path)) > 0:
+    feedback_train_ds = datasets.ImageFolder(feedback_path, transform=train_tf)
+
+    if len(feedback_train_ds) > 0:
+        print(f"Feedback samples found: {len(feedback_train_ds)}")
+        train_ds = ConcatDataset([original_train_ds, feedback_train_ds])
+    else:
+        print("Feedback folder exists but contains no images.")
+        train_ds = original_train_ds
+else:
+    print("No feedback dataset found.")
+    train_ds = original_train_ds
+
+# Validation dataset remains same
 val_ds = datasets.ImageFolder("data/custom/val", transform=val_tf)
 
 train_loader = DataLoader(train_ds, batch_size=32, shuffle=True)
 val_loader = DataLoader(val_ds, batch_size=32)
+
+print(f"Total training samples: {len(train_ds)}")
 
 # --- YOUR CUSTOM ARCHITECTURE (No Pre-existing Models) ---
 
