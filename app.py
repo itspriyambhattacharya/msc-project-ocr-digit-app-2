@@ -43,10 +43,22 @@ class PriyamDigitNet(nn.Module):
 
 
 # Load your custom model weights
-model = PriyamDigitNet().to(device)
-model.load_state_dict(torch.load(os.path.join(
-    BASE_DIR, "digit_model.pth"), map_location=device))
-model.eval()
+# model = PriyamDigitNet().to(device)
+# model.load_state_dict(torch.load(os.path.join(
+#     BASE_DIR, "digit_model.pth"), map_location=device))
+# model.eval()
+
+try:
+    model = PriyamDigitNet().to(device)
+    model.load_state_dict(
+        torch.load(os.path.join(BASE_DIR, "digit_model.pth"),
+                   map_location=device)
+    )
+    model.eval()
+    print("Model loaded successfully.")
+except Exception as e:
+    print("MODEL LOADING ERROR:", str(e))
+    raise e
 
 
 def predict_digit(img_path):
