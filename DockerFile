@@ -1,9 +1,29 @@
 FROM python:3.11-slim
+
+# Set working directory
 WORKDIR /app
-RUN apt-get update && apt-get install -y libgl1-mesa-glx libglib2.0-0 && rm -rf /var/lib/apt/lists/*
+
+# Install system dependencies for OpenCV/PIL
+RUN apt-get update && apt-get install -y \
+    libgl1-mesa-glx \
+    libglib2.0-0 \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy and install Python dependencies
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
+# Install gunicorn for production hosting
+RUN pip install gunicorn
+
+# Copy project files
 COPY . .
+
+# Create upload directory with correct permissions for the HF user (UID 1000)
 RUN mkdir -p static/uploads && chmod 777 static/uploads
+
+# Expose the port Hugging Face listens on
 EXPOSE 7860
-CMD ["python", "app.py"]
+
+# Run the app using Gunicorn
+# "app:app" refers to (file_name):(flask_variable_name)
+CMD ["gunicorn", "-b", "0.0.0.0:7860", "app:app"]
