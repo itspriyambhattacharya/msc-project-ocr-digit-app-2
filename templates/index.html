@@ -71,7 +71,6 @@
           </form>
         </div>
 
-        <!-- Prediction Section -->
         {% if prediction is not none %}
 
         <div class="grid md:grid-cols-2 gap-8">
@@ -83,12 +82,10 @@
               Input Source
             </h3>
 
-            <div class="relative group">
-              <img
-                src="{{ image }}"
-                class="rounded-xl border-4 border-slate-700 shadow-2xl max-h-64 object-contain transition-transform duration-500 group-hover:scale-105"
-              />
-            </div>
+            <img
+              src="{{ image }}"
+              class="rounded-xl border-4 border-slate-700 shadow-2xl max-h-64 object-contain"
+            />
 
             {% if filename %}
             <p class="mt-4 text-slate-500 text-sm italic">
@@ -99,7 +96,7 @@
 
           <!-- Prediction Result -->
           <div
-            class="glass rounded-3xl p-6 flex flex-col justify-center items-center text-center"
+            class="glass rounded-3xl p-6 flex flex-col items-center text-center"
           >
             <h3
               class="text-slate-400 uppercase text-xs font-bold tracking-widest mb-4"
@@ -113,12 +110,11 @@
               </span>
             </div>
 
-            <!-- Confidence Bar -->
             <div class="w-full mt-4">
               <div class="flex justify-between mb-2 px-2">
-                <span class="text-sm font-medium text-blue-400">
-                  Confidence
-                </span>
+                <span class="text-sm font-medium text-blue-400"
+                  >Confidence</span
+                >
                 <span class="text-sm font-medium text-blue-400">
                   {{ confidence }}%
                 </span>
@@ -134,38 +130,83 @@
               </div>
             </div>
 
-            <!-- Metadata -->
-            <div class="mt-8 flex gap-4">
-              <div
-                class="bg-slate-800/80 px-4 py-2 rounded-lg border border-slate-700"
+            <!-- ================= FEEDBACK FORM ================= -->
+
+            <form
+              action="/feedback"
+              method="POST"
+              class="mt-8 space-y-4 w-full"
+            >
+              <input type="hidden" name="filename" value="{{ filename }}" />
+              <input type="hidden" name="predicted" value="{{ prediction }}" />
+
+              <label class="block text-sm font-medium">
+                Was the prediction correct?
+              </label>
+
+              <select
+                name="feedback"
+                id="feedbackSelect"
+                class="w-full bg-slate-800 p-2 rounded"
+                required
               >
-                <span class="block text-[10px] text-slate-500 uppercase">
-                  Device
-                </span>
-                <span class="text-emerald-400 font-mono text-sm"> CPU </span>
+                <option value="">Select</option>
+                <option value="yes">Yes</option>
+                <option value="no">No</option>
+              </select>
+
+              <!-- Correct Digit Section (Hidden Initially) -->
+              <div id="correctDigitSection" class="hidden">
+                <label class="block text-sm font-medium mt-4">
+                  Select correct digit:
+                </label>
+
+                <select
+                  name="correct_digit"
+                  class="w-full bg-slate-800 p-2 rounded"
+                >
+                  <option value="">Select Digit</option>
+                  {% for i in range(10) %}
+                  <option value="{{ i }}">{{ i }}</option>
+                  {% endfor %}
+                </select>
               </div>
 
-              <div
-                class="bg-slate-800/80 px-4 py-2 rounded-lg border border-slate-700"
+              <button
+                type="submit"
+                class="bg-purple-600 hover:bg-purple-700 px-4 py-2 rounded font-bold w-full"
               >
-                <span class="block text-[10px] text-slate-500 uppercase">
-                  Model
-                </span>
-                <span class="text-blue-400 font-mono text-sm">
-                  PriyamDigitNet
-                </span>
-              </div>
-            </div>
+                Submit Feedback
+              </button>
+            </form>
+
+            <!-- ================================================= -->
           </div>
         </div>
 
         {% endif %}
       </div>
 
-      <!-- Footer -->
       <footer class="mt-20 text-center text-slate-500 text-sm">
         <p>&copy; 2026 University of Calcutta - Computer Science Dept.</p>
       </footer>
     </div>
+
+    <!-- ================= JS LOGIC ================= -->
+
+    <script>
+      const feedbackSelect = document.getElementById("feedbackSelect");
+      const correctSection = document.getElementById("correctDigitSection");
+
+      if (feedbackSelect) {
+        feedbackSelect.addEventListener("change", function () {
+          if (this.value === "no") {
+            correctSection.classList.remove("hidden");
+          } else {
+            correctSection.classList.add("hidden");
+          }
+        });
+      }
+    </script>
   </body>
 </html>

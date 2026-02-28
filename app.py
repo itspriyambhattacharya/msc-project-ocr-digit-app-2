@@ -1,4 +1,6 @@
 import os
+import uuid
+import shutil
 import torch
 import torch.nn as nn
 from flask import Flask, render_template, request
@@ -8,19 +10,26 @@ from PIL import Image, ImageOps
 app = Flask(__name__)
 
 # ==============================
-# Paths & Device
+# Paths & Directories
 # ==============================
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 UPLOAD_FOLDER = os.path.join(BASE_DIR, "static", "uploads")
+FEEDBACK_FOLDER = os.path.join(BASE_DIR, "data", "live_feedback")
+
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 
+# Create feedback folders 0-9
+for i in range(10):
+    os.makedirs(os.path.join(FEEDBACK_FOLDER, str(i)), exist_ok=True)
+
 device = torch.device("cpu")
+model = None
+
 
 # ==============================
 # Model Architecture
 # ==============================
-
 
 class PriyamDigitNet(nn.Module):
     def __init__(self):
@@ -53,73 +62,59 @@ class PriyamDigitNet(nn.Module):
 
 
 # ==============================
-# Safe Model Loading
+# Load Model Safely
 # ==============================
-
-model = None
-
 
 def load_model():
     global model
     if model is None:
         model = PriyamDigitNet().to(device)
-        state_dict = torch.load(
-            os.path.join(BASE_DIR, "digit_model.pth"),
-            map_location=device
+        model.load_state_dict(
+            torch.load(
+                os.path.join(BASE_DIR, "digit_model.pth"),
+                map_location=device
+            )
         )
-        model.load_state_dict(state_dict)
         model.eval()
 
 
 # ==============================
-# Safe Prediction Function
+# Prediction Logic
 # ==============================
 
 def predict_digit(img_path):
-    try:
-        load_model()
+    load_model()
 
-        img = Image.open(img_path).convert("L")
+    img = Image.open(img_path).convert("L")
 
-        if img.size[0] == 0 or img.size[1] == 0:
-            return "Invalid Image", 0
+    # Match training preprocessing
+    if img.getpixel((0, 0)) > 120:
+        img = ImageOps.invert(img)
 
-        try:
-            if img.getpixel((0, 0)) > 120:
-                img = ImageOps.invert(img)
-        except:
-            pass
-
-        bbox = img.getbbox()
-        if bbox is None:
-            return "No Digit", 0
-
+    bbox = img.getbbox()
+    if bbox:
         img = img.crop(bbox)
 
-        w, h = img.size
-        m = max(w, h) + 10
+    w, h = img.size
+    m = max(w, h) + 10
 
-        new_img = Image.new("L", (m, m), 0)
-        new_img.paste(img, ((m - w) // 2, (m - h) // 2))
+    new_img = Image.new("L", (m, m), 0)
+    new_img.paste(img, ((m - w) // 2, (m - h) // 2))
 
-        transform = transforms.Compose([
-            transforms.Resize((32, 32)),
-            transforms.ToTensor(),
-            transforms.Normalize((0.5,), (0.5,))
-        ])
+    transform = transforms.Compose([
+        transforms.Resize((32, 32)),
+        transforms.ToTensor(),
+        transforms.Normalize((0.5,), (0.5,))
+    ])
 
-        tensor = transform(new_img).unsqueeze(0).to(device)
+    tensor = transform(new_img).unsqueeze(0).to(device)
 
-        with torch.no_grad():
-            output = model(tensor)
-            prob = torch.nn.functional.softmax(output, dim=1)
-            conf, pred = torch.max(prob, 1)
+    with torch.no_grad():
+        output = model(tensor)
+        prob = torch.softmax(output, dim=1)
+        conf, pred = torch.max(prob, 1)
 
-        return pred.item(), round(conf.item() * 100, 2)
-
-    except Exception as e:
-        print("PREDICTION ERROR:", str(e))
-        return "Error", 0
+    return pred.item(), round(conf.item() * 100, 2)
 
 
 # ==============================
@@ -128,24 +123,29 @@ def predict_digit(img_path):
 
 @app.route("/", methods=["GET", "POST"])
 def index():
+
     prediction = None
     confidence = None
     img_url = None
     filename = None
 
-    if request.method == "POST":
-        file = request.files.get("file")
+    if request.method == "POST" and "file" in request.files:
 
-        if file and file.filename != "":
-            filename = file.filename
-            filepath = os.path.join(UPLOAD_FOLDER, filename)
+        file = request.files["file"]
+
+        if file.filename != "":
+
+            # Generate unique filename
+            original_name = file.filename
+            unique_name = str(uuid.uuid4()) + "_" + original_name
+            filepath = os.path.join(UPLOAD_FOLDER, unique_name)
+
             file.save(filepath)
 
-            digit, conf = predict_digit(filepath)
+            prediction, confidence = predict_digit(filepath)
 
-            prediction = digit
-            confidence = conf
-            img_url = f"static/uploads/{filename}"
+            img_url = f"static/uploads/{unique_name}"
+            filename = unique_name
 
     return render_template(
         "index.html",
@@ -154,3 +154,41 @@ def index():
         image=img_url,
         filename=filename
     )
+
+
+@app.route("/feedback", methods=["POST"])
+def feedback():
+
+    filename = request.form.get("filename")
+    predicted_digit = request.form.get("predicted")
+    feedback_choice = request.form.get("feedback")
+    correct_digit = request.form.get("correct_digit")
+
+    if not filename or not feedback_choice:
+        return render_template("thankyou.html")
+
+    source_path = os.path.join(UPLOAD_FOLDER, filename)
+
+    # Determine correct target digit
+    if feedback_choice == "yes":
+        target_digit = predicted_digit
+
+    elif feedback_choice == "no" and correct_digit and correct_digit.isdigit():
+        target_digit = correct_digit
+
+    else:
+        return render_template("thankyou.html")
+
+    target_folder = os.path.join(FEEDBACK_FOLDER, target_digit)
+    os.makedirs(target_folder, exist_ok=True)
+
+    target_path = os.path.join(target_folder, filename)
+
+    # Copy image to feedback dataset
+    if os.path.exists(source_path):
+        shutil.copy(source_path, target_path)
+
+        # Optional: remove from uploads to save space
+        # os.remove(source_path)
+
+    return render_template("thankyou.html")
