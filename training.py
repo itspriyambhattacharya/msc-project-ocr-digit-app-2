@@ -143,4 +143,4 @@ for epoch in range(50):
         best_acc = acc
         torch.save(model.state_dict(), "digit_model.pth")
 
-print(f"Project Best Accuracy: {best_acc}%")
+print(f"Project Best Accuracy: {round(best_acc,2)}%")
