@@ -1,27 +1,28 @@
-import zipfile
-from flask import send_file
 import os
 import uuid
 import shutil
+import zipfile
 import torch
 import torch.nn as nn
-from flask import Flask, render_template, request
+from flask import Flask, render_template, request, send_file, abort
 from torchvision import transforms
 from PIL import Image, ImageOps
 
 app = Flask(__name__)
 
 # ==============================
-# Paths & Directories
+# Paths & Configuration
 # ==============================
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+ADMIN_SECRET = "password"   # Change this to something strong and private
+
 UPLOAD_FOLDER = os.path.join(BASE_DIR, "static", "uploads")
 FEEDBACK_FOLDER = os.path.join(BASE_DIR, "data", "live_feedback")
 
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 
-# Create feedback folders 0-9
+# Create feedback folders 0-9 at startup
 for i in range(10):
     os.makedirs(os.path.join(FEEDBACK_FOLDER, str(i)), exist_ok=True)
 
@@ -64,7 +65,7 @@ class PriyamDigitNet(nn.Module):
 
 
 # ==============================
-# Load Model Safely
+# Load Model
 # ==============================
 
 def load_model():
@@ -81,7 +82,7 @@ def load_model():
 
 
 # ==============================
-# Prediction Logic
+# Prediction Function
 # ==============================
 
 def predict_digit(img_path):
@@ -136,8 +137,6 @@ def index():
         file = request.files["file"]
 
         if file.filename != "":
-
-            # Generate unique filename
             original_name = file.filename
             unique_name = str(uuid.uuid4()) + "_" + original_name
             filepath = os.path.join(UPLOAD_FOLDER, unique_name)
@@ -171,7 +170,6 @@ def feedback():
 
     source_path = os.path.join(UPLOAD_FOLDER, filename)
 
-    # Determine correct target digit
     if feedback_choice == "yes":
         target_digit = predicted_digit
 
@@ -186,11 +184,39 @@ def feedback():
 
     target_path = os.path.join(target_folder, filename)
 
-    # Copy image to feedback dataset
     if os.path.exists(source_path):
         shutil.copy(source_path, target_path)
 
-        # Optional: remove from uploads to save space
-        # os.remove(source_path)
-
     return render_template("thankyou.html")
+
+
+# ==============================
+# Admin Download Route (Protected)
+# ==============================
+
+@app.route("/admin/download_feedback")
+def download_feedback():
+
+    key = request.args.get("key")
+
+    if key != ADMIN_SECRET:
+        abort(403)
+
+    zip_path = os.path.join(BASE_DIR, "feedback_data.zip")
+
+    with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zipf:
+        for root, dirs, files in os.walk(FEEDBACK_FOLDER):
+            for file in files:
+                file_path = os.path.join(root, file)
+                arcname = os.path.relpath(file_path, FEEDBACK_FOLDER)
+                zipf.write(file_path, arcname)
+
+    return send_file(zip_path, as_attachment=True)
+
+
+# ==============================
+# Run
+# ==============================
+
+if __name__ == "__main__":
+    app.run(host="0.0.0.0", port=7860)
