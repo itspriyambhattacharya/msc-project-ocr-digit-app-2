@@ -11,31 +11,53 @@ from flask import (
     send_file,
     abort,
     redirect,
-    send_from_directory
+    send_from_directory,
+    session
 )
 from torchvision import transforms
 from PIL import Image, ImageOps
 
 app = Flask(__name__)
+app.secret_key = "change_this_to_a_long_random_secret_key"
 
 # ==============================
 # Paths & Configuration
 # ==============================
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-ADMIN_SECRET = "password"   # CHANGE THIS
 
 UPLOAD_FOLDER = os.path.join(BASE_DIR, "static", "uploads")
 FEEDBACK_FOLDER = os.path.join(BASE_DIR, "data", "live_feedback")
 
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 
-# Create feedback folders 0-9 at startup
 for i in range(10):
     os.makedirs(os.path.join(FEEDBACK_FOLDER, str(i)), exist_ok=True)
 
 device = torch.device("cpu")
 model = None
+
+# ==============================
+# ADMIN CONFIGURATION
+# ==============================
+
+ADMINS = {
+    "adminpriyam": {
+        "name": "Priyam Bhattacharya",
+        "password": "Priyam Bhattacharya",
+        "image": "admins/priyam.webp"
+    },
+    "adminpritam": {
+        "name": "Pritam Mondal",
+        "password": "Pritam Mondal",
+        "image": "admins/pritam.webp"
+    },
+    "adminsreena": {
+        "name": "Sreena Mondal",
+        "password": "Sreena Mondal",
+        "image": "admins/sreena.webp"
+    }
+}
 
 # ==============================
 # Model Architecture
@@ -126,7 +148,7 @@ def predict_digit(img_path):
     return pred.item(), round(conf.item() * 100, 2)
 
 # ==============================
-# Main Routes
+# MAIN ROUTES
 # ==============================
 
 
@@ -139,7 +161,6 @@ def index():
     filename = None
 
     if request.method == "POST" and "file" in request.files:
-
         file = request.files["file"]
 
         if file.filename != "":
@@ -192,10 +213,6 @@ def feedback():
 
     return render_template("thankyou.html")
 
-# ==============================
-# Serve Feedback Images
-# ==============================
-
 
 @app.route("/feedback_images/<digit>/<filename>")
 def serve_feedback_image(digit, filename):
@@ -205,16 +222,34 @@ def serve_feedback_image(digit, filename):
     )
 
 # ==============================
-# Admin Panel
+# ADMIN AUTH SYSTEM
 # ==============================
 
 
-@app.route("/admin/panel")
-def admin_panel():
+@app.route("/admin", methods=["GET", "POST"])
+def admin_login():
 
-    key = request.args.get("key")
-    if key != ADMIN_SECRET:
-        abort(403)
+    if request.method == "POST":
+        user_id = request.form.get("user_id")
+        password = request.form.get("password")
+
+        if user_id in ADMINS and ADMINS[user_id]["password"] == password:
+            session["admin"] = user_id
+            return redirect("/admin/dashboard")
+
+        return render_template("admin_login.html", error="Invalid credentials")
+
+    return render_template("admin_login.html")
+
+
+@app.route("/admin/dashboard")
+def admin_dashboard():
+
+    if "admin" not in session:
+        return redirect("/admin")
+
+    admin_id = session["admin"]
+    admin_info = ADMINS[admin_id]
 
     feedback_data = {}
 
@@ -230,40 +265,47 @@ def admin_panel():
         feedback_data[str(digit)] = images
 
     return render_template(
-        "admin_panel.html",
-        feedback_data=feedback_data,
-        admin_key=ADMIN_SECRET
+        "admin_dashboard.html",
+        admin=admin_info,
+        feedback_data=feedback_data
+    )
+
+
+@app.route("/admin/download_image/<digit>/<filename>")
+def download_image(digit, filename):
+
+    if "admin" not in session:
+        return redirect("/admin")
+
+    return send_from_directory(
+        os.path.join(FEEDBACK_FOLDER, digit),
+        filename,
+        as_attachment=True
     )
 
 
 @app.route("/admin/delete_image", methods=["POST"])
 def delete_image():
 
-    key = request.form.get("key")
+    if "admin" not in session:
+        return redirect("/admin")
+
     digit = request.form.get("digit")
     filename = request.form.get("filename")
-
-    if key != ADMIN_SECRET:
-        abort(403)
 
     file_path = os.path.join(FEEDBACK_FOLDER, digit, filename)
 
     if os.path.exists(file_path):
         os.remove(file_path)
 
-    return redirect(f"/admin/panel?key={ADMIN_SECRET}")
-
-# ==============================
-# Admin Download
-# ==============================
+    return redirect("/admin/dashboard")
 
 
-@app.route("/admin/download_feedback")
-def download_feedback():
+@app.route("/admin/download_all")
+def download_all():
 
-    key = request.args.get("key")
-    if key != ADMIN_SECRET:
-        abort(403)
+    if "admin" not in session:
+        return redirect("/admin")
 
     zip_path = os.path.join(BASE_DIR, "feedback_data.zip")
 
@@ -276,30 +318,29 @@ def download_feedback():
 
     return send_file(zip_path, as_attachment=True)
 
-# ==============================
-# Admin Clear All
-# ==============================
 
+@app.route("/admin/delete_all", methods=["POST"])
+def delete_all():
 
-@app.route("/admin/clear_feedback")
-def clear_feedback():
-
-    key = request.args.get("key")
-    if key != ADMIN_SECRET:
-        abort(403)
+    if "admin" not in session:
+        return redirect("/admin")
 
     for digit in range(10):
         digit_folder = os.path.join(FEEDBACK_FOLDER, str(digit))
         if os.path.exists(digit_folder):
             for file in os.listdir(digit_folder):
-                file_path = os.path.join(digit_folder, file)
-                if os.path.isfile(file_path):
-                    os.remove(file_path)
+                os.remove(os.path.join(digit_folder, file))
 
-    return render_template("admin_success.html")
+    return redirect("/admin/dashboard")
+
+
+@app.route("/admin/logout")
+def admin_logout():
+    session.pop("admin", None)
+    return redirect("/admin")
 
 # ==============================
-# Run
+# RUN
 # ==============================
 
 
