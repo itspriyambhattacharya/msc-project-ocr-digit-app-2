@@ -164,7 +164,7 @@ def train_model():
 
     best_acc = 0
 
-    for epoch in range(50):
+    for epoch in range(5):
 
         model.train()
         running_loss = 0
