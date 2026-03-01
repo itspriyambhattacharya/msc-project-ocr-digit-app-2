@@ -46,10 +46,22 @@
 
     <div class="container mx-auto px-4 py-12">
       <!-- Header -->
-      <header class="text-center mb-16">
+      <header class="relative text-center mb-16">
+        <!-- Admin Link (Top Right) -->
+        <div class="absolute right-0 top-0">
+          <a
+            href="/admin/login"
+            class="text-sm text-slate-400 hover:text-white transition duration-300 flex items-center gap-2"
+          >
+            <i class="fas fa-user-shield"></i>
+            Admin Panel
+          </a>
+        </div>
+
         <h1 class="text-5xl font-extrabold tracking-tight text-white mb-4">
           Deep<span class="text-blue-500">Scan</span> OCR
         </h1>
+
         <p class="text-slate-400 text-lg max-w-2xl mx-auto">
           M.Sc. Computer Science Project: Priyam Bhattacharya, Pritam Mondal and
           Sreena Mondal.
