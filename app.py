@@ -9,19 +9,24 @@ from flask import (
     render_template,
     request,
     send_file,
-    abort,
     redirect,
     send_from_directory,
-    session
+    session,
+    abort
 )
 from torchvision import transforms
 from PIL import Image, ImageOps
-
-app = Flask(__name__)
-app.secret_key = "change_this_to_a_long_random_secret_key"
+from werkzeug.security import generate_password_hash, check_password_hash
 
 # ==============================
-# Paths & Configuration
+# Flask Setup
+# ==============================
+
+app = Flask(__name__)
+app.secret_key = "replace_this_with_long_random_secret_key_123456"
+
+# ==============================
+# Paths & Directories
 # ==============================
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -38,24 +43,24 @@ device = torch.device("cpu")
 model = None
 
 # ==============================
-# ADMIN CONFIGURATION
+# ADMIN CONFIGURATION (SECURE)
 # ==============================
 
 ADMINS = {
     "adminpriyam": {
         "name": "Priyam Bhattacharya",
-        "password": "Priyam Bhattacharya",
-        "image": "admins/priyam.webp"
+        "password": generate_password_hash("Priyam Bhattacharya"),
+        "image": "https://1drv.ms/u/c/71f0b9c95c099bd5/IQBNGckAppDZSZNNJiGBvAknAaLUq8TSUjOfwVlxmhCBASI"
     },
     "adminpritam": {
         "name": "Pritam Mondal",
-        "password": "Pritam Mondal",
-        "image": "admins/pritam.webp"
+        "password": generate_password_hash("Pritam Mondal"),
+        "image": "https://1drv.ms/u/c/71f0b9c95c099bd5/IQCCEeOWQsSVTqDPvMn6_q0OAYcb-NoO6J-6fTFtRtXa_2c"
     },
     "adminsreena": {
         "name": "Sreena Mondal",
-        "password": "Sreena Mondal",
-        "image": "admins/sreena.webp"
+        "password": generate_password_hash("Sreena Mondal"),
+        "image": "https://1drv.ms/u/c/71f0b9c95c099bd5/IQB5KWorh4ccRK2iblQQv2O7AWvK_JMsjsnbcECkJkjBqE8"
     }
 }
 
@@ -93,6 +98,7 @@ class PriyamDigitNet(nn.Module):
         x = self.fc2(x)
         return x
 
+
 # ==============================
 # Load Model
 # ==============================
@@ -110,8 +116,9 @@ def load_model():
         )
         model.eval()
 
+
 # ==============================
-# Prediction
+# Prediction Function
 # ==============================
 
 
@@ -147,6 +154,7 @@ def predict_digit(img_path):
 
     return pred.item(), round(conf.item() * 100, 2)
 
+
 # ==============================
 # MAIN ROUTES
 # ==============================
@@ -166,7 +174,6 @@ def index():
         if file.filename != "":
             unique_name = str(uuid.uuid4()) + "_" + file.filename
             filepath = os.path.join(UPLOAD_FOLDER, unique_name)
-
             file.save(filepath)
 
             prediction, confidence = predict_digit(filepath)
@@ -204,8 +211,6 @@ def feedback():
         return render_template("thankyou.html")
 
     target_folder = os.path.join(FEEDBACK_FOLDER, target_digit)
-    os.makedirs(target_folder, exist_ok=True)
-
     target_path = os.path.join(target_folder, filename)
 
     if os.path.exists(source_path):
@@ -214,15 +219,8 @@ def feedback():
     return render_template("thankyou.html")
 
 
-@app.route("/feedback_images/<digit>/<filename>")
-def serve_feedback_image(digit, filename):
-    return send_from_directory(
-        os.path.join(FEEDBACK_FOLDER, digit),
-        filename
-    )
-
 # ==============================
-# ADMIN AUTH SYSTEM
+# ADMIN AUTH
 # ==============================
 
 
@@ -233,7 +231,8 @@ def admin_login():
         user_id = request.form.get("user_id")
         password = request.form.get("password")
 
-        if user_id in ADMINS and ADMINS[user_id]["password"] == password:
+        if user_id in ADMINS and check_password_hash(
+                ADMINS[user_id]["password"], password):
             session["admin"] = user_id
             return redirect("/admin/dashboard")
 
@@ -271,78 +270,15 @@ def admin_dashboard():
     )
 
 
-@app.route("/admin/download_image/<digit>/<filename>")
-def download_image(digit, filename):
-
-    if "admin" not in session:
-        return redirect("/admin")
-
-    return send_from_directory(
-        os.path.join(FEEDBACK_FOLDER, digit),
-        filename,
-        as_attachment=True
-    )
-
-
-@app.route("/admin/delete_image", methods=["POST"])
-def delete_image():
-
-    if "admin" not in session:
-        return redirect("/admin")
-
-    digit = request.form.get("digit")
-    filename = request.form.get("filename")
-
-    file_path = os.path.join(FEEDBACK_FOLDER, digit, filename)
-
-    if os.path.exists(file_path):
-        os.remove(file_path)
-
-    return redirect("/admin/dashboard")
-
-
-@app.route("/admin/download_all")
-def download_all():
-
-    if "admin" not in session:
-        return redirect("/admin")
-
-    zip_path = os.path.join(BASE_DIR, "feedback_data.zip")
-
-    with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zipf:
-        for root, dirs, files in os.walk(FEEDBACK_FOLDER):
-            for file in files:
-                file_path = os.path.join(root, file)
-                arcname = os.path.relpath(file_path, FEEDBACK_FOLDER)
-                zipf.write(file_path, arcname)
-
-    return send_file(zip_path, as_attachment=True)
-
-
-@app.route("/admin/delete_all", methods=["POST"])
-def delete_all():
-
-    if "admin" not in session:
-        return redirect("/admin")
-
-    for digit in range(10):
-        digit_folder = os.path.join(FEEDBACK_FOLDER, str(digit))
-        if os.path.exists(digit_folder):
-            for file in os.listdir(digit_folder):
-                os.remove(os.path.join(digit_folder, file))
-
-    return redirect("/admin/dashboard")
-
-
 @app.route("/admin/logout")
 def admin_logout():
     session.pop("admin", None)
     return redirect("/admin")
 
+
 # ==============================
 # RUN
 # ==============================
-
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=7860)
