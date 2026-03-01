@@ -1,0 +1,76 @@
+<!doctype html>
+<html>
+  <head>
+    <title>Admin Dashboard</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+  </head>
+
+  <body class="bg-slate-900 text-white min-h-screen">
+    <div class="container mx-auto py-10">
+      <!-- Admin Info -->
+      <div class="bg-slate-800 p-6 rounded-xl flex items-center gap-6 mb-10">
+        <img
+          src="/{{ admin.image }}"
+          class="w-24 h-24 rounded-full border-4 border-blue-500"
+        />
+
+        <div>
+          <h2 class="text-2xl font-bold">{{ admin.name }}</h2>
+          <p class="text-slate-400">Administrator Panel</p>
+
+          <div class="mt-4 flex gap-4">
+            <a
+              href="/admin/download_all"
+              class="bg-green-600 px-4 py-2 rounded"
+            >
+              Download All Feedback
+            </a>
+
+            <form method="POST" action="/admin/delete_all">
+              <button class="bg-red-600 px-4 py-2 rounded">
+                Delete All Feedback
+              </button>
+            </form>
+
+            <a href="/admin/logout" class="bg-slate-700 px-4 py-2 rounded">
+              Logout
+            </a>
+          </div>
+        </div>
+      </div>
+
+      <!-- Feedback Images -->
+      {% for digit, images in feedback_data.items() %}
+      <h3 class="text-xl font-bold mb-4">Digit {{ digit }}</h3>
+
+      <div class="grid grid-cols-6 gap-4 mb-10">
+        {% for img in images %}
+        <div class="bg-slate-800 p-2 rounded text-center">
+          <img
+            src="/feedback_images/{{ digit }}/{{ img }}"
+            class="h-24 mx-auto mb-2 object-contain"
+          />
+
+          <div class="flex justify-center gap-2">
+            <a
+              href="/admin/download_image/{{ digit }}/{{ img }}"
+              class="bg-blue-600 px-2 py-1 text-xs rounded"
+            >
+              Download
+            </a>
+
+            <form method="POST" action="/admin/delete_image">
+              <input type="hidden" name="digit" value="{{ digit }}" />
+              <input type="hidden" name="filename" value="{{ img }}" />
+              <button class="bg-red-600 px-2 py-1 text-xs rounded">
+                Delete
+              </button>
+            </form>
+          </div>
+        </div>
+        {% endfor %}
+      </div>
+      {% endfor %}
+    </div>
+  </body>
+</html>
