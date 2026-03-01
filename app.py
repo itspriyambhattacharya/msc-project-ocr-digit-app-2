@@ -23,14 +23,29 @@ os.makedirs(FEEDBACK_FOLDER, exist_ok=True)
 
 
 class CNN(nn.Module):
-    def __init__(self):
-        super(CNN, self).__init__()
-        self.conv1 = nn.Conv2d(1, 32, 3, 1)
-        self.conv2 = nn.Conv2d(32, 64, 3, 1)
-        self.pool = nn.MaxPool2d(2)
-        self.fc1 = nn.Linear(9216, 128)
-        self.fc2 = nn.Linear(128, 10)
-        self.relu = nn.ReLU()
+    def __init__(self, num_classes=10):
+        super(PriyamDigitNet, self).__init__()
+
+        self.relu = nn.LeakyReLU(0.1)
+        self.pool = nn.MaxPool2d(2, 2)
+
+        self.conv1 = nn.Conv2d(1, 32, 3, padding=1)
+        self.bn1 = nn.BatchNorm2d(32)
+
+        self.conv2 = nn.Conv2d(32, 64, 3, padding=1)
+        self.bn2 = nn.BatchNorm2d(64)
+
+        self.conv3 = nn.Conv2d(64, 128, 3, padding=1)
+        self.bn3 = nn.BatchNorm2d(128)
+
+        self.conv4 = nn.Conv2d(128, 256, 3, padding=1)
+        self.bn4 = nn.BatchNorm2d(256)
+
+        self.dropout_conv = nn.Dropout2d(0.3)
+        self.dropout_fc = nn.Dropout(0.5)
+
+        self.fc1 = nn.Linear(256 * 2 * 2, 256)
+        self.fc2 = nn.Linear(256, num_classes)
 
     def forward(self, x):
         x = self.relu(self.conv1(x))
