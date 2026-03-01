@@ -8,29 +8,23 @@ from werkzeug.utils import secure_filename
 import uuid
 import shutil
 
-# ===================== FLASK APP =====================
+# ================= FLASK APP =================
 
 app = Flask(__name__)
-
-# ===================== CONFIG =====================
 
 UPLOAD_FOLDER = "uploads"
 FEEDBACK_FOLDER = "data/live_feedback"
 MODEL_PATH = "model.pth"
 
-ADMIN_USER = "admin"
-ADMIN_PASSWORD = "password"  # change in production
-
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 os.makedirs(FEEDBACK_FOLDER, exist_ok=True)
 
-# ===================== LOAD MODEL =====================
+# ================= MODEL =================
 
 
 class CNN(nn.Module):
     def __init__(self):
         super(CNN, self).__init__()
-
         self.conv1 = nn.Conv2d(1, 32, 3, 1)
         self.conv2 = nn.Conv2d(32, 64, 3, 1)
         self.pool = nn.MaxPool2d(2)
@@ -50,8 +44,14 @@ class CNN(nn.Module):
 
 device = torch.device("cpu")
 model = CNN()
-model.load_state_dict(torch.load(MODEL_PATH, map_location=device))
-model.eval()
+
+# SAFE MODEL LOADING
+if os.path.exists(MODEL_PATH):
+    model.load_state_dict(torch.load(MODEL_PATH, map_location=device))
+    model.eval()
+    print("Model loaded successfully.")
+else:
+    print("WARNING: model.pth not found. App will run but predictions disabled.")
 
 transform = transforms.Compose([
     transforms.Grayscale(),
@@ -59,9 +59,7 @@ transform = transforms.Compose([
     transforms.ToTensor(),
 ])
 
-# =========================================================
-# ======================= ROUTES ===========================
-# =========================================================
+# ================= HOME =================
 
 
 @app.route("/", methods=["GET", "POST"])
@@ -82,13 +80,18 @@ def home():
             image = Image.open(filepath)
             image = transform(image).unsqueeze(0)
 
-            with torch.no_grad():
-                output = model(image)
-                probs = torch.softmax(output, dim=1)
-                conf, pred = torch.max(probs, 1)
+            if os.path.exists(MODEL_PATH):
+                with torch.no_grad():
+                    output = model(image)
+                    probs = torch.softmax(output, dim=1)
+                    conf, pred = torch.max(probs, 1)
 
-            prediction = pred.item()
-            confidence = round(conf.item() * 100, 2)
+                prediction = pred.item()
+                confidence = round(conf.item() * 100, 2)
+            else:
+                prediction = "Model Missing"
+                confidence = 0
+
             image_path = "/" + filepath
 
     return render_template(
@@ -99,18 +102,17 @@ def home():
         filename=filename
     )
 
+# ================= FEEDBACK =================
 
-# ===================== FEEDBACK =====================
 
 @app.route("/feedback", methods=["POST"])
 def feedback():
 
     filename = request.form.get("filename")
-    predicted = request.form.get("predicted")
     feedback = request.form.get("feedback")
     correct_digit = request.form.get("correct_digit")
 
-    if feedback == "no" and correct_digit != "":
+    if feedback == "no" and correct_digit:
         source_path = os.path.join(UPLOAD_FOLDER, filename)
 
         target_dir = os.path.join(FEEDBACK_FOLDER, correct_digit)
@@ -123,80 +125,8 @@ def feedback():
 
     return redirect(url_for("home"))
 
+# ================= RUN =================
 
-# ===================== ADMIN LOGIN =====================
-
-@app.route("/admin/login", methods=["GET", "POST"])
-def admin_login():
-
-    error = None
-
-    if request.method == "POST":
-        user = request.form.get("user_id")
-        password = request.form.get("password")
-
-        if user == ADMIN_USER and password == ADMIN_PASSWORD:
-            return redirect(url_for("admin_panel", key=ADMIN_PASSWORD))
-        else:
-            error = "Invalid credentials"
-
-    return render_template("admin_login.html", error=error)
-
-
-# ===================== ADMIN PANEL =====================
-
-@app.route("/admin")
-def admin_panel():
-
-    key = request.args.get("key")
-
-    if key != ADMIN_PASSWORD:
-        return redirect(url_for("admin_login"))
-
-    feedback_data = {}
-
-    for digit in range(10):
-        digit_path = os.path.join(FEEDBACK_FOLDER, str(digit))
-        if os.path.exists(digit_path):
-            feedback_data[str(digit)] = os.listdir(digit_path)
-        else:
-            feedback_data[str(digit)] = []
-
-    return render_template(
-        "admin_panel.html",
-        feedback_data=feedback_data,
-        admin_key=ADMIN_PASSWORD
-    )
-
-
-# ===================== DELETE IMAGE =====================
-
-@app.route("/admin/delete_image", methods=["POST"])
-def delete_image():
-
-    key = request.form.get("key")
-    digit = request.form.get("digit")
-    filename = request.form.get("filename")
-
-    if key != ADMIN_PASSWORD:
-        return redirect(url_for("admin_login"))
-
-    file_path = os.path.join(FEEDBACK_FOLDER, digit, filename)
-
-    if os.path.exists(file_path):
-        os.remove(file_path)
-
-    return redirect(url_for("admin_panel", key=ADMIN_PASSWORD))
-
-
-# ===================== STATIC FILE SERVING =====================
-
-@app.route("/data/live_feedback/<digit>/<filename>")
-def serve_feedback(digit, filename):
-    return app.send_static_file(f"../data/live_feedback/{digit}/{filename}")
-
-
-# ===================== RUN =====================
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=7860)
