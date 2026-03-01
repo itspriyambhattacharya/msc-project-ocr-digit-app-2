@@ -4,7 +4,15 @@ import shutil
 import zipfile
 import torch
 import torch.nn as nn
-from flask import Flask, render_template, request, send_file, abort
+from flask import (
+    Flask,
+    render_template,
+    request,
+    send_file,
+    abort,
+    redirect,
+    send_from_directory
+)
 from torchvision import transforms
 from PIL import Image, ImageOps
 
@@ -15,7 +23,7 @@ app = Flask(__name__)
 # ==============================
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-ADMIN_SECRET = "password"   # Change this to something strong and private
+ADMIN_SECRET = "password"   # CHANGE THIS
 
 UPLOAD_FOLDER = os.path.join(BASE_DIR, "static", "uploads")
 FEEDBACK_FOLDER = os.path.join(BASE_DIR, "data", "live_feedback")
@@ -29,10 +37,10 @@ for i in range(10):
 device = torch.device("cpu")
 model = None
 
-
 # ==============================
 # Model Architecture
 # ==============================
+
 
 class PriyamDigitNet(nn.Module):
     def __init__(self):
@@ -63,10 +71,10 @@ class PriyamDigitNet(nn.Module):
         x = self.fc2(x)
         return x
 
-
 # ==============================
 # Load Model
 # ==============================
+
 
 def load_model():
     global model
@@ -80,17 +88,16 @@ def load_model():
         )
         model.eval()
 
+# ==============================
+# Prediction
+# ==============================
 
-# ==============================
-# Prediction Function
-# ==============================
 
 def predict_digit(img_path):
     load_model()
 
     img = Image.open(img_path).convert("L")
 
-    # Match training preprocessing
     if img.getpixel((0, 0)) > 120:
         img = ImageOps.invert(img)
 
@@ -100,7 +107,6 @@ def predict_digit(img_path):
 
     w, h = img.size
     m = max(w, h) + 10
-
     new_img = Image.new("L", (m, m), 0)
     new_img.paste(img, ((m - w) // 2, (m - h) // 2))
 
@@ -119,10 +125,10 @@ def predict_digit(img_path):
 
     return pred.item(), round(conf.item() * 100, 2)
 
+# ==============================
+# Main Routes
+# ==============================
 
-# ==============================
-# Routes
-# ==============================
 
 @app.route("/", methods=["GET", "POST"])
 def index():
@@ -137,8 +143,7 @@ def index():
         file = request.files["file"]
 
         if file.filename != "":
-            original_name = file.filename
-            unique_name = str(uuid.uuid4()) + "_" + original_name
+            unique_name = str(uuid.uuid4()) + "_" + file.filename
             filepath = os.path.join(UPLOAD_FOLDER, unique_name)
 
             file.save(filepath)
@@ -172,10 +177,8 @@ def feedback():
 
     if feedback_choice == "yes":
         target_digit = predicted_digit
-
     elif feedback_choice == "no" and correct_digit and correct_digit.isdigit():
         target_digit = correct_digit
-
     else:
         return render_template("thankyou.html")
 
@@ -189,16 +192,76 @@ def feedback():
 
     return render_template("thankyou.html")
 
+# ==============================
+# Serve Feedback Images
+# ==============================
+
+
+@app.route("/feedback_images/<digit>/<filename>")
+def serve_feedback_image(digit, filename):
+    return send_from_directory(
+        os.path.join(FEEDBACK_FOLDER, digit),
+        filename
+    )
 
 # ==============================
-# Admin Download Route (Protected)
+# Admin Panel
 # ==============================
+
+
+@app.route("/admin/panel")
+def admin_panel():
+
+    key = request.args.get("key")
+    if key != ADMIN_SECRET:
+        abort(403)
+
+    feedback_data = {}
+
+    for digit in range(10):
+        digit_folder = os.path.join(FEEDBACK_FOLDER, str(digit))
+        images = []
+
+        if os.path.exists(digit_folder):
+            for file in os.listdir(digit_folder):
+                if os.path.isfile(os.path.join(digit_folder, file)):
+                    images.append(file)
+
+        feedback_data[str(digit)] = images
+
+    return render_template(
+        "admin_panel.html",
+        feedback_data=feedback_data,
+        admin_key=ADMIN_SECRET
+    )
+
+
+@app.route("/admin/delete_image", methods=["POST"])
+def delete_image():
+
+    key = request.form.get("key")
+    digit = request.form.get("digit")
+    filename = request.form.get("filename")
+
+    if key != ADMIN_SECRET:
+        abort(403)
+
+    file_path = os.path.join(FEEDBACK_FOLDER, digit, filename)
+
+    if os.path.exists(file_path):
+        os.remove(file_path)
+
+    return redirect(f"/admin/panel?key={ADMIN_SECRET}")
+
+# ==============================
+# Admin Download
+# ==============================
+
 
 @app.route("/admin/download_feedback")
 def download_feedback():
 
     key = request.args.get("key")
-
     if key != ADMIN_SECRET:
         abort(403)
 
@@ -213,27 +276,23 @@ def download_feedback():
 
     return send_file(zip_path, as_attachment=True)
 
+# ==============================
+# Admin Clear All
+# ==============================
 
-# ==============================
-# Admin Clear Feedback Route
-# ==============================
 
 @app.route("/admin/clear_feedback")
 def clear_feedback():
 
     key = request.args.get("key")
-
     if key != ADMIN_SECRET:
         abort(403)
 
-    # Delete all files inside each digit folder
     for digit in range(10):
         digit_folder = os.path.join(FEEDBACK_FOLDER, str(digit))
-
         if os.path.exists(digit_folder):
             for file in os.listdir(digit_folder):
                 file_path = os.path.join(digit_folder, file)
-
                 if os.path.isfile(file_path):
                     os.remove(file_path)
 
