@@ -215,8 +215,34 @@ def download_feedback():
 
 
 # ==============================
+# Admin Clear Feedback Route
+# ==============================
+
+@app.route("/admin/clear_feedback")
+def clear_feedback():
+
+    key = request.args.get("key")
+
+    if key != ADMIN_SECRET:
+        abort(403)
+
+    # Delete all files inside each digit folder
+    for digit in range(10):
+        digit_folder = os.path.join(FEEDBACK_FOLDER, str(digit))
+
+        if os.path.exists(digit_folder):
+            for file in os.listdir(digit_folder):
+                file_path = os.path.join(digit_folder, file)
+
+                if os.path.isfile(file_path):
+                    os.remove(file_path)
+
+    return render_template("admin_success.html")
+
+# ==============================
 # Run
 # ==============================
+
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=7860)
