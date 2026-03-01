@@ -1,293 +1,202 @@
 import os
-import uuid
-import shutil
-import zipfile
 import torch
 import torch.nn as nn
-from flask import (
-    Flask,
-    render_template,
-    request,
-    redirect,
-    send_from_directory,
-    send_file,
-    session
-)
 from torchvision import transforms
-from PIL import Image, ImageOps
-from werkzeug.security import generate_password_hash, check_password_hash
+from PIL import Image
+from flask import Flask, render_template, request, redirect, url_for
+from werkzeug.utils import secure_filename
+import uuid
+import shutil
 
-# ==============================
-# Flask Setup
-# ==============================
+# ===================== FLASK APP =====================
 
 app = Flask(__name__)
-app.secret_key = "replace_with_very_long_random_secret_key_123456"
 
-# ==============================
-# Paths
-# ==============================
+# ===================== CONFIG =====================
 
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+UPLOAD_FOLDER = "uploads"
+FEEDBACK_FOLDER = "data/live_feedback"
+MODEL_PATH = "model.pth"
 
-UPLOAD_FOLDER = os.path.join(BASE_DIR, "static", "uploads")
-FEEDBACK_FOLDER = os.path.join(BASE_DIR, "data", "live_feedback")
+ADMIN_USER = "admin"
+ADMIN_PASSWORD = "password"  # change in production
 
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
+os.makedirs(FEEDBACK_FOLDER, exist_ok=True)
 
-for i in range(10):
-    os.makedirs(os.path.join(FEEDBACK_FOLDER, str(i)), exist_ok=True)
-
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-model = None
-
-# ==============================
-# ADMIN CONFIG
-# ==============================
-
-ADMINS = {
-    "adminpriyam": {
-        "name": "Priyam Bhattacharya",
-        "password": generate_password_hash("Priyam Bhattacharya"),
-        "image": "https://1drv.ms/u/c/71f0b9c95c099bd5/IQBNGckAppDZSZNNJiGBvAknAaLUq8TSUjOfwVlxmhCBASI"
-    },
-    "adminpritam": {
-        "name": "Pritam Mondal",
-        "password": generate_password_hash("Pritam Mondal"),
-        "image": "https://1drv.ms/u/c/71f0b9c95c099bd5/IQCCEeOWQsSVTqDPvMn6_q0OAYcb-NoO6J-6fTFtRtXa_2c"
-    },
-    "adminsreena": {
-        "name": "Sreena Mondal",
-        "password": generate_password_hash("Sreena Mondal"),
-        "image": "https://1drv.ms/u/c/71f0b9c95c099bd5/IQB5KWorh4ccRK2iblQQv2O7AWvK_JMsjsnbcECkJkjBqE8"
-    }
-}
-
-# ==============================
-# MODEL (IDENTICAL TO TRAINING)
-# ==============================
+# ===================== LOAD MODEL =====================
 
 
-class PriyamDigitNet(nn.Module):
-    def __init__(self, num_classes=10):
-        super(PriyamDigitNet, self).__init__()
+class CNN(nn.Module):
+    def __init__(self):
+        super(CNN, self).__init__()
 
-        self.relu = nn.LeakyReLU(0.1)
-        self.pool = nn.MaxPool2d(2, 2)
-
-        self.conv1 = nn.Conv2d(1, 32, 3, padding=1)
-        self.bn1 = nn.BatchNorm2d(32)
-
-        self.conv2 = nn.Conv2d(32, 64, 3, padding=1)
-        self.bn2 = nn.BatchNorm2d(64)
-
-        self.conv3 = nn.Conv2d(64, 128, 3, padding=1)
-        self.bn3 = nn.BatchNorm2d(128)
-
-        self.conv4 = nn.Conv2d(128, 256, 3, padding=1)
-        self.bn4 = nn.BatchNorm2d(256)
-
-        self.dropout_conv = nn.Dropout2d(0.3)
-        self.dropout_fc = nn.Dropout(0.5)
-
-        self.fc1 = nn.Linear(256 * 2 * 2, 256)
-        self.fc2 = nn.Linear(256, num_classes)
+        self.conv1 = nn.Conv2d(1, 32, 3, 1)
+        self.conv2 = nn.Conv2d(32, 64, 3, 1)
+        self.pool = nn.MaxPool2d(2)
+        self.fc1 = nn.Linear(9216, 128)
+        self.fc2 = nn.Linear(128, 10)
+        self.relu = nn.ReLU()
 
     def forward(self, x):
-        x = self.pool(self.relu(self.bn1(self.conv1(x))))
-        x = self.pool(self.relu(self.bn2(self.conv2(x))))
-        x = self.pool(self.relu(self.bn3(self.conv3(x))))
-        x = self.pool(self.relu(self.bn4(self.conv4(x))))
-
-        x = self.dropout_conv(x)
-        x = x.view(x.size(0), -1)
-
-        x = self.dropout_fc(self.relu(self.fc1(x)))
+        x = self.relu(self.conv1(x))
+        x = self.relu(self.conv2(x))
+        x = self.pool(x)
+        x = torch.flatten(x, 1)
+        x = self.relu(self.fc1(x))
         x = self.fc2(x)
-
         return x
 
 
-def load_model():
-    global model
-    if model is None:
-        model = PriyamDigitNet().to(device)
-        model.load_state_dict(
-            torch.load(os.path.join(BASE_DIR, "digit_model.pth"),
-                       map_location=device)
-        )
-        model.eval()
+device = torch.device("cpu")
+model = CNN()
+model.load_state_dict(torch.load(MODEL_PATH, map_location=device))
+model.eval()
 
+transform = transforms.Compose([
+    transforms.Grayscale(),
+    transforms.Resize((28, 28)),
+    transforms.ToTensor(),
+])
 
-def predict_digit(img_path):
-    load_model()
+# =========================================================
+# ======================= ROUTES ===========================
+# =========================================================
 
-    img = Image.open(img_path).convert("L")
-
-    if img.getpixel((0, 0)) > 120:
-        img = ImageOps.invert(img)
-
-    bbox = img.getbbox()
-    if bbox:
-        img = img.crop(bbox)
-
-    w, h = img.size
-    m = max(w, h) + 10
-    new_img = Image.new("L", (m, m), 0)
-    new_img.paste(img, ((m - w) // 2, (m - h) // 2))
-
-    transform = transforms.Compose([
-        transforms.Resize((32, 32)),
-        transforms.ToTensor(),
-        transforms.Normalize((0.5,), (0.5,))
-    ])
-
-    tensor = transform(new_img).unsqueeze(0).to(device)
-
-    with torch.no_grad():
-        output = model(tensor)
-        prob = torch.softmax(output, dim=1)
-        conf, pred = torch.max(prob, 1)
-
-    return pred.item(), round(conf.item() * 100, 2)
-
-
-# ==============================
-# MAIN ROUTES
-# ==============================
 
 @app.route("/", methods=["GET", "POST"])
-def index():
-
+def home():
     prediction = None
     confidence = None
-    img_url = None
+    image_path = None
     filename = None
 
-    if request.method == "POST" and "file" in request.files:
+    if request.method == "POST":
         file = request.files["file"]
 
-        if file.filename != "":
-            unique_name = str(uuid.uuid4()) + "_" + file.filename
-            filepath = os.path.join(UPLOAD_FOLDER, unique_name)
+        if file:
+            filename = secure_filename(file.filename)
+            filepath = os.path.join(UPLOAD_FOLDER, filename)
             file.save(filepath)
 
-            prediction, confidence = predict_digit(filepath)
+            image = Image.open(filepath)
+            image = transform(image).unsqueeze(0)
 
-            img_url = f"static/uploads/{unique_name}"
-            filename = unique_name
+            with torch.no_grad():
+                output = model(image)
+                probs = torch.softmax(output, dim=1)
+                conf, pred = torch.max(probs, 1)
+
+            prediction = pred.item()
+            confidence = round(conf.item() * 100, 2)
+            image_path = "/" + filepath
 
     return render_template(
         "index.html",
         prediction=prediction,
         confidence=confidence,
-        image=img_url,
+        image=image_path,
         filename=filename
     )
 
+
+# ===================== FEEDBACK =====================
 
 @app.route("/feedback", methods=["POST"])
 def feedback():
 
     filename = request.form.get("filename")
-    predicted_digit = request.form.get("predicted")
-    feedback_choice = request.form.get("feedback")
+    predicted = request.form.get("predicted")
+    feedback = request.form.get("feedback")
     correct_digit = request.form.get("correct_digit")
 
-    if not filename or not feedback_choice:
-        return render_template("thankyou.html")
+    if feedback == "no" and correct_digit != "":
+        source_path = os.path.join(UPLOAD_FOLDER, filename)
 
-    source_path = os.path.join(UPLOAD_FOLDER, filename)
+        target_dir = os.path.join(FEEDBACK_FOLDER, correct_digit)
+        os.makedirs(target_dir, exist_ok=True)
 
-    if feedback_choice == "yes":
-        target_digit = predicted_digit
-    elif feedback_choice == "no" and correct_digit and correct_digit.isdigit():
-        target_digit = correct_digit
-    else:
-        return render_template("thankyou.html")
+        new_name = str(uuid.uuid4()) + ".png"
+        target_path = os.path.join(target_dir, new_name)
 
-    target_folder = os.path.join(FEEDBACK_FOLDER, target_digit)
-    shutil.copy(source_path, os.path.join(target_folder, filename))
+        shutil.copy(source_path, target_path)
 
-    return render_template("thankyou.html")
+    return redirect(url_for("home"))
 
 
-# ==============================
-# ADMIN LOGIN
-# ==============================
+# ===================== ADMIN LOGIN =====================
 
-@app.route("/admin", methods=["GET", "POST"])
+@app.route("/admin/login", methods=["GET", "POST"])
 def admin_login():
 
+    error = None
+
     if request.method == "POST":
-        user_id = request.form.get("user_id")
+        user = request.form.get("user_id")
         password = request.form.get("password")
 
-        if user_id in ADMINS and check_password_hash(
-                ADMINS[user_id]["password"], password):
-            session["admin"] = user_id
-            return redirect("/admin/dashboard")
+        if user == ADMIN_USER and password == ADMIN_PASSWORD:
+            return redirect(url_for("admin_panel", key=ADMIN_PASSWORD))
+        else:
+            error = "Invalid credentials"
 
-        return render_template("admin_login.html", error="Invalid credentials")
-
-    return render_template("admin_login.html")
+    return render_template("admin_login.html", error=error)
 
 
-@app.route("/admin/dashboard")
-def admin_dashboard():
+# ===================== ADMIN PANEL =====================
 
-    if "admin" not in session:
-        return redirect("/admin")
+@app.route("/admin")
+def admin_panel():
+
+    key = request.args.get("key")
+
+    if key != ADMIN_PASSWORD:
+        return redirect(url_for("admin_login"))
 
     feedback_data = {}
 
     for digit in range(10):
-        digit_folder = os.path.join(FEEDBACK_FOLDER, str(digit))
-        feedback_data[str(digit)] = os.listdir(digit_folder)
+        digit_path = os.path.join(FEEDBACK_FOLDER, str(digit))
+        if os.path.exists(digit_path):
+            feedback_data[str(digit)] = os.listdir(digit_path)
+        else:
+            feedback_data[str(digit)] = []
 
     return render_template(
-        "admin_dashboard.html",
-        admin=ADMINS[session["admin"]],
-        feedback_data=feedback_data
+        "admin_panel.html",
+        feedback_data=feedback_data,
+        admin_key=ADMIN_PASSWORD
     )
 
 
-@app.route("/admin/download_image/<digit>/<filename>")
-def download_image(digit, filename):
+# ===================== DELETE IMAGE =====================
 
-    if "admin" not in session:
-        return redirect("/admin")
+@app.route("/admin/delete_image", methods=["POST"])
+def delete_image():
 
-    return send_from_directory(
-        os.path.join(FEEDBACK_FOLDER, digit),
-        filename,
-        as_attachment=True
-    )
+    key = request.form.get("key")
+    digit = request.form.get("digit")
+    filename = request.form.get("filename")
 
+    if key != ADMIN_PASSWORD:
+        return redirect(url_for("admin_login"))
 
-@app.route("/admin/download_all")
-def download_all():
+    file_path = os.path.join(FEEDBACK_FOLDER, digit, filename)
 
-    if "admin" not in session:
-        return redirect("/admin")
+    if os.path.exists(file_path):
+        os.remove(file_path)
 
-    zip_path = os.path.join(BASE_DIR, "feedback_data.zip")
-
-    with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zipf:
-        for root, dirs, files in os.walk(FEEDBACK_FOLDER):
-            for file in files:
-                full_path = os.path.join(root, file)
-                arcname = os.path.relpath(full_path, FEEDBACK_FOLDER)
-                zipf.write(full_path, arcname)
-
-    return send_file(zip_path, as_attachment=True)
+    return redirect(url_for("admin_panel", key=ADMIN_PASSWORD))
 
 
-@app.route("/admin/logout")
-def admin_logout():
-    session.pop("admin", None)
-    return redirect("/admin")
+# ===================== STATIC FILE SERVING =====================
 
+@app.route("/data/live_feedback/<digit>/<filename>")
+def serve_feedback(digit, filename):
+    return app.send_static_file(f"../data/live_feedback/{digit}/{filename}")
+
+
+# ===================== RUN =====================
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=7860)
