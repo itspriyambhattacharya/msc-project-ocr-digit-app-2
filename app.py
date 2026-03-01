@@ -14,7 +14,7 @@ app = Flask(__name__)
 
 UPLOAD_FOLDER = "uploads"
 FEEDBACK_FOLDER = "data/live_feedback"
-MODEL_PATH = "model.pth"
+MODEL_PATH = "digit_model.pth"
 
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 os.makedirs(FEEDBACK_FOLDER, exist_ok=True)
