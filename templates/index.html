@@ -26,6 +26,39 @@
   </head>
 
   <body class="text-slate-200 font-sans antialiased">
+    <!-- ================= PROCESSING OVERLAY ================= -->
+
+    <div
+      id="processingOverlay"
+      class="hidden fixed inset-0 bg-black/80 backdrop-blur-md flex flex-col items-center justify-center z-50"
+    >
+      <div class="text-center">
+        <div
+          class="animate-spin rounded-full h-20 w-20 border-4 border-blue-500 border-t-transparent mx-auto mb-6"
+        ></div>
+
+        <h2 class="text-2xl font-bold mb-2">Analyzing Digit...</h2>
+        <p class="text-slate-400 mb-6">
+          Please wait while the model processes your image.
+        </p>
+
+        <!-- Fake Progress Bar -->
+        <div class="w-80 bg-slate-700 rounded-full h-3 overflow-hidden">
+          <div
+            id="progressBar"
+            class="bg-blue-500 h-3 rounded-full transition-all duration-300"
+            style="width: 0%"
+          ></div>
+        </div>
+
+        <p class="mt-4 text-sm text-slate-400">
+          Processing Time: <span id="timer">0</span>s
+        </p>
+      </div>
+    </div>
+
+    <!-- ====================================================== -->
+
     <div class="container mx-auto px-4 py-12">
       <!-- Header -->
       <header class="text-center mb-16">
@@ -42,6 +75,7 @@
       <div class="max-w-4xl mx-auto">
         <div class="glass rounded-3xl p-8 mb-10 shadow-2xl">
           <form
+            id="uploadForm"
             action="/"
             method="POST"
             enctype="multipart/form-data"
@@ -62,6 +96,7 @@
             </div>
 
             <button
+              id="analyzeBtn"
               type="submit"
               class="w-full md:w-auto px-10 py-3 bg-emerald-500 hover:bg-emerald-600 text-white font-bold rounded-full transition-all transform hover:scale-105 shadow-lg flex items-center justify-center gap-2"
             >
@@ -74,7 +109,6 @@
         {% if prediction is not none %}
 
         <div class="grid md:grid-cols-2 gap-8">
-          <!-- Uploaded Image -->
           <div class="glass rounded-3xl p-6 flex flex-col items-center">
             <h3
               class="text-slate-400 uppercase text-xs font-bold tracking-widest mb-4"
@@ -94,7 +128,6 @@
             {% endif %}
           </div>
 
-          <!-- Prediction Result -->
           <div
             class="glass rounded-3xl p-6 flex flex-col items-center text-center"
           >
@@ -129,58 +162,6 @@
                 ></div>
               </div>
             </div>
-
-            <!-- ================= FEEDBACK FORM ================= -->
-
-            <form
-              action="/feedback"
-              method="POST"
-              class="mt-8 space-y-4 w-full"
-            >
-              <input type="hidden" name="filename" value="{{ filename }}" />
-              <input type="hidden" name="predicted" value="{{ prediction }}" />
-
-              <label class="block text-sm font-medium">
-                Was the prediction correct?
-              </label>
-
-              <select
-                name="feedback"
-                id="feedbackSelect"
-                class="w-full bg-slate-800 p-2 rounded"
-                required
-              >
-                <option value="">Select</option>
-                <option value="yes">Yes</option>
-                <option value="no">No</option>
-              </select>
-
-              <!-- Correct Digit Section (Hidden Initially) -->
-              <div id="correctDigitSection" class="hidden">
-                <label class="block text-sm font-medium mt-4">
-                  Select correct digit:
-                </label>
-
-                <select
-                  name="correct_digit"
-                  class="w-full bg-slate-800 p-2 rounded"
-                >
-                  <option value="">Select Digit</option>
-                  {% for i in range(10) %}
-                  <option value="{{ i }}">{{ i }}</option>
-                  {% endfor %}
-                </select>
-              </div>
-
-              <button
-                type="submit"
-                class="bg-purple-600 hover:bg-purple-700 px-4 py-2 rounded font-bold w-full"
-              >
-                Submit Feedback
-              </button>
-            </form>
-
-            <!-- ================================================= -->
           </div>
         </div>
 
@@ -192,21 +173,36 @@
       </footer>
     </div>
 
-    <!-- ================= JS LOGIC ================= -->
+    <!-- ================= JAVASCRIPT ================= -->
 
     <script>
-      const feedbackSelect = document.getElementById("feedbackSelect");
-      const correctSection = document.getElementById("correctDigitSection");
+      const form = document.getElementById("uploadForm");
+      const overlay = document.getElementById("processingOverlay");
+      const progressBar = document.getElementById("progressBar");
+      const timerDisplay = document.getElementById("timer");
+      const analyzeBtn = document.getElementById("analyzeBtn");
 
-      if (feedbackSelect) {
-        feedbackSelect.addEventListener("change", function () {
-          if (this.value === "no") {
-            correctSection.classList.remove("hidden");
-          } else {
-            correctSection.classList.add("hidden");
+      let progress = 0;
+      let seconds = 0;
+
+      form.addEventListener("submit", function () {
+        overlay.classList.remove("hidden");
+        analyzeBtn.disabled = true;
+
+        // Fake progress animation
+        const progressInterval = setInterval(() => {
+          if (progress < 90) {
+            progress += Math.random() * 5;
+            progressBar.style.width = progress + "%";
           }
-        });
-      }
+        }, 200);
+
+        // Timer
+        const timerInterval = setInterval(() => {
+          seconds += 1;
+          timerDisplay.textContent = seconds;
+        }, 1000);
+      });
     </script>
   </body>
 </html>
