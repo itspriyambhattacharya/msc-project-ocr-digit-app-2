@@ -1,6 +1,7 @@
 import os
 import uuid
 import shutil
+import zipfile
 import torch
 import torch.nn as nn
 from flask import (
@@ -9,6 +10,7 @@ from flask import (
     request,
     redirect,
     send_from_directory,
+    send_file,
     session
 )
 from torchvision import transforms
@@ -20,7 +22,7 @@ from werkzeug.security import generate_password_hash, check_password_hash
 # ==============================
 
 app = Flask(__name__)
-app.secret_key = "replace_this_with_a_long_random_secret_key"
+app.secret_key = "replace_with_very_long_random_secret_key_123456"
 
 # ==============================
 # Paths
@@ -40,7 +42,7 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 model = None
 
 # ==============================
-# ADMIN CONFIGURATION
+# ADMIN CONFIG
 # ==============================
 
 ADMINS = {
@@ -62,7 +64,7 @@ ADMINS = {
 }
 
 # ==============================
-# Model Architecture (IDENTICAL TO training.py)
+# MODEL (IDENTICAL TO TRAINING)
 # ==============================
 
 
@@ -106,27 +108,15 @@ class PriyamDigitNet(nn.Module):
         return x
 
 
-# ==============================
-# Load Model
-# ==============================
-
-
 def load_model():
     global model
     if model is None:
         model = PriyamDigitNet().to(device)
         model.load_state_dict(
-            torch.load(
-                os.path.join(BASE_DIR, "digit_model.pth"),
-                map_location=device
-            )
+            torch.load(os.path.join(BASE_DIR, "digit_model.pth"),
+                       map_location=device)
         )
         model.eval()
-
-
-# ==============================
-# Prediction
-# ==============================
 
 
 def predict_digit(img_path):
@@ -134,7 +124,6 @@ def predict_digit(img_path):
 
     img = Image.open(img_path).convert("L")
 
-    # Same preprocessing as training
     if img.getpixel((0, 0)) > 120:
         img = ImageOps.invert(img)
 
@@ -166,7 +155,6 @@ def predict_digit(img_path):
 # ==============================
 # MAIN ROUTES
 # ==============================
-
 
 @app.route("/", methods=["GET", "POST"])
 def index():
@@ -219,10 +207,7 @@ def feedback():
         return render_template("thankyou.html")
 
     target_folder = os.path.join(FEEDBACK_FOLDER, target_digit)
-    target_path = os.path.join(target_folder, filename)
-
-    if os.path.exists(source_path):
-        shutil.copy(source_path, target_path)
+    shutil.copy(source_path, os.path.join(target_folder, filename))
 
     return render_template("thankyou.html")
 
@@ -230,7 +215,6 @@ def feedback():
 # ==============================
 # ADMIN LOGIN
 # ==============================
-
 
 @app.route("/admin", methods=["GET", "POST"])
 def admin_login():
@@ -255,27 +239,48 @@ def admin_dashboard():
     if "admin" not in session:
         return redirect("/admin")
 
-    admin_id = session["admin"]
-    admin_info = ADMINS[admin_id]
-
     feedback_data = {}
 
     for digit in range(10):
         digit_folder = os.path.join(FEEDBACK_FOLDER, str(digit))
-        images = []
-
-        if os.path.exists(digit_folder):
-            for file in os.listdir(digit_folder):
-                if os.path.isfile(os.path.join(digit_folder, file)):
-                    images.append(file)
-
-        feedback_data[str(digit)] = images
+        feedback_data[str(digit)] = os.listdir(digit_folder)
 
     return render_template(
         "admin_dashboard.html",
-        admin=admin_info,
+        admin=ADMINS[session["admin"]],
         feedback_data=feedback_data
     )
+
+
+@app.route("/admin/download_image/<digit>/<filename>")
+def download_image(digit, filename):
+
+    if "admin" not in session:
+        return redirect("/admin")
+
+    return send_from_directory(
+        os.path.join(FEEDBACK_FOLDER, digit),
+        filename,
+        as_attachment=True
+    )
+
+
+@app.route("/admin/download_all")
+def download_all():
+
+    if "admin" not in session:
+        return redirect("/admin")
+
+    zip_path = os.path.join(BASE_DIR, "feedback_data.zip")
+
+    with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zipf:
+        for root, dirs, files in os.walk(FEEDBACK_FOLDER):
+            for file in files:
+                full_path = os.path.join(root, file)
+                arcname = os.path.relpath(full_path, FEEDBACK_FOLDER)
+                zipf.write(full_path, arcname)
+
+    return send_file(zip_path, as_attachment=True)
 
 
 @app.route("/admin/logout")
@@ -283,10 +288,6 @@ def admin_logout():
     session.pop("admin", None)
     return redirect("/admin")
 
-
-# ==============================
-# RUN
-# ==============================
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=7860)
