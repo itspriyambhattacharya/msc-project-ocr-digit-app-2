@@ -1,0 +1,80 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Admin Action Successful</title>
+
+    <script src="https://cdn.tailwindcss.com"></script>
+
+    <style>
+      body {
+        background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%);
+        min-height: 100vh;
+      }
+      .glass {
+        background: rgba(255, 255, 255, 0.05);
+        backdrop-filter: blur(12px);
+        border: 1px solid rgba(255, 255, 255, 0.1);
+      }
+    </style>
+  </head>
+
+  <body
+    class="text-slate-200 font-sans antialiased flex items-center justify-center"
+  >
+    <div class="glass p-10 rounded-3xl shadow-2xl text-center max-w-md w-full">
+      <!-- Success Icon -->
+      <div class="mb-6">
+        <div
+          class="w-20 h-20 mx-auto bg-emerald-500/20 rounded-full flex items-center justify-center"
+        >
+          <svg
+            class="w-10 h-10 text-emerald-400"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="3"
+            viewBox="0 0 24 24"
+          >
+            <path
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              d="M5 13l4 4L19 7"
+            />
+          </svg>
+        </div>
+      </div>
+
+      <!-- Heading -->
+      <h1 class="text-3xl font-bold text-white mb-4">
+        Admin Operation Successful
+      </h1>
+
+      <!-- Message -->
+      <p class="text-slate-400 mb-6">
+        The feedback dataset has been cleared successfully. The system is now
+        ready to collect new user feedback.
+      </p>
+
+      <!-- Buttons -->
+      <div class="flex flex-col gap-4">
+        <a
+          href="/"
+          class="bg-blue-600 hover:bg-blue-700 transition px-4 py-2 rounded-lg font-semibold"
+        >
+          Go to Home
+        </a>
+
+        <a
+          href="/admin/download_feedback?key=password"
+          class="bg-purple-600 hover:bg-purple-700 transition px-4 py-2 rounded-lg font-semibold"
+        >
+          Download Feedback Again
+        </a>
+      </div>
+
+      <!-- Footer -->
+      <p class="text-xs text-slate-500 mt-8">DeepScan Admin Panel</p>
+    </div>
+  </body>
+</html>
