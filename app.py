@@ -2,6 +2,8 @@ import os
 import uuid
 import shutil
 import zipfile
+import cv2
+import numpy as np
 import torch
 import torch.nn as nn
 from flask import (
@@ -13,8 +15,6 @@ from flask import (
     redirect,
     send_from_directory
 )
-from torchvision import transforms
-from PIL import Image, ImageOps
 
 app = Flask(__name__)
 
@@ -23,14 +23,13 @@ app = Flask(__name__)
 # ==============================
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-ADMIN_SECRET = "password"   # CHANGE THIS
+ADMIN_SECRET = "password"
 
 UPLOAD_FOLDER = os.path.join(BASE_DIR, "static", "uploads")
 FEEDBACK_FOLDER = os.path.join(BASE_DIR, "data", "live_feedback")
 
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 
-# Create feedback folders 0-9 at startup
 for i in range(10):
     os.makedirs(os.path.join(FEEDBACK_FOLDER, str(i)), exist_ok=True)
 
@@ -38,13 +37,13 @@ device = torch.device("cpu")
 model = None
 
 # ==============================
-# Model Architecture
+# Model Architecture (MUST MATCH training.py)
 # ==============================
 
 
 class PriyamDigitNet(nn.Module):
     def __init__(self, num_classes=10):
-        super(PriyamDigitNet, self).__init__()
+        super().__init__()
 
         self.relu = nn.LeakyReLU(0.1)
         self.pool = nn.MaxPool2d(2, 2)
@@ -68,7 +67,6 @@ class PriyamDigitNet(nn.Module):
         self.fc2 = nn.Linear(256, num_classes)
 
     def forward(self, x):
-
         x = self.pool(self.relu(self.bn1(self.conv1(x))))
         x = self.pool(self.relu(self.bn2(self.conv2(x))))
         x = self.pool(self.relu(self.bn3(self.conv3(x))))
@@ -100,6 +98,53 @@ def load_model():
         model.eval()
 
 # ==============================
+# Robust Preprocessing
+# ==============================
+
+
+def preprocess_image(img_path):
+
+    img = cv2.imread(img_path, cv2.IMREAD_GRAYSCALE)
+
+    # Blur to reduce noise
+    img = cv2.GaussianBlur(img, (5, 5), 0)
+
+    # Adaptive threshold (handles shadows & texture)
+    img = cv2.adaptiveThreshold(
+        img,
+        255,
+        cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
+        cv2.THRESH_BINARY_INV,
+        11,
+        2
+    )
+
+    # Morphological closing to remove small gaps
+    kernel = np.ones((3, 3), np.uint8)
+    img = cv2.morphologyEx(img, cv2.MORPH_CLOSE, kernel)
+
+    coords = cv2.findNonZero(img)
+
+    if coords is not None:
+        x, y, w, h = cv2.boundingRect(coords)
+        img = img[y:y+h, x:x+w]
+
+    size = max(img.shape) + 10
+    square = np.zeros((size, size), dtype=np.uint8)
+
+    h, w = img.shape
+    square[(size-h)//2:(size-h)//2+h,
+           (size-w)//2:(size-w)//2+w] = img
+
+    square = cv2.resize(square, (32, 32))
+
+    square = square.astype("float32") / 255.0
+    square = (square - 0.5) / 0.5
+
+    tensor = torch.tensor(square).unsqueeze(0).unsqueeze(0)
+    return tensor.to(device)
+
+# ==============================
 # Prediction
 # ==============================
 
@@ -107,27 +152,7 @@ def load_model():
 def predict_digit(img_path):
     load_model()
 
-    img = Image.open(img_path).convert("L")
-
-    if img.getpixel((0, 0)) > 120:
-        img = ImageOps.invert(img)
-
-    bbox = img.getbbox()
-    if bbox:
-        img = img.crop(bbox)
-
-    w, h = img.size
-    m = max(w, h) + 10
-    new_img = Image.new("L", (m, m), 0)
-    new_img.paste(img, ((m - w) // 2, (m - h) // 2))
-
-    transform = transforms.Compose([
-        transforms.Resize((32, 32)),
-        transforms.ToTensor(),
-        transforms.Normalize((0.5,), (0.5,))
-    ])
-
-    tensor = transform(new_img).unsqueeze(0).to(device)
+    tensor = preprocess_image(img_path)
 
     with torch.no_grad():
         output = model(tensor)
@@ -137,7 +162,7 @@ def predict_digit(img_path):
     return pred.item(), round(conf.item() * 100, 2)
 
 # ==============================
-# Main Routes
+# Routes
 # ==============================
 
 
@@ -156,7 +181,6 @@ def index():
         if file.filename != "":
             unique_name = str(uuid.uuid4()) + "_" + file.filename
             filepath = os.path.join(UPLOAD_FOLDER, unique_name)
-
             file.save(filepath)
 
             prediction, confidence = predict_digit(filepath)
@@ -171,6 +195,10 @@ def index():
         image=img_url,
         filename=filename
     )
+
+# ==============================
+# Feedback
+# ==============================
 
 
 @app.route("/feedback", methods=["POST"])
@@ -196,73 +224,10 @@ def feedback():
     target_folder = os.path.join(FEEDBACK_FOLDER, target_digit)
     os.makedirs(target_folder, exist_ok=True)
 
-    target_path = os.path.join(target_folder, filename)
-
     if os.path.exists(source_path):
-        shutil.copy(source_path, target_path)
+        shutil.copy(source_path, os.path.join(target_folder, filename))
 
     return render_template("thankyou.html")
-
-# ==============================
-# Serve Feedback Images
-# ==============================
-
-
-@app.route("/feedback_images/<digit>/<filename>")
-def serve_feedback_image(digit, filename):
-    return send_from_directory(
-        os.path.join(FEEDBACK_FOLDER, digit),
-        filename
-    )
-
-# ==============================
-# Admin Panel
-# ==============================
-
-
-@app.route("/admin/panel")
-def admin_panel():
-
-    key = request.args.get("key")
-    if key != ADMIN_SECRET:
-        abort(403)
-
-    feedback_data = {}
-
-    for digit in range(10):
-        digit_folder = os.path.join(FEEDBACK_FOLDER, str(digit))
-        images = []
-
-        if os.path.exists(digit_folder):
-            for file in os.listdir(digit_folder):
-                if os.path.isfile(os.path.join(digit_folder, file)):
-                    images.append(file)
-
-        feedback_data[str(digit)] = images
-
-    return render_template(
-        "admin_panel.html",
-        feedback_data=feedback_data,
-        admin_key=ADMIN_SECRET
-    )
-
-
-@app.route("/admin/delete_image", methods=["POST"])
-def delete_image():
-
-    key = request.form.get("key")
-    digit = request.form.get("digit")
-    filename = request.form.get("filename")
-
-    if key != ADMIN_SECRET:
-        abort(403)
-
-    file_path = os.path.join(FEEDBACK_FOLDER, digit, filename)
-
-    if os.path.exists(file_path):
-        os.remove(file_path)
-
-    return redirect(f"/admin/panel?key={ADMIN_SECRET}")
 
 # ==============================
 # Admin Download
@@ -286,28 +251,6 @@ def download_feedback():
                 zipf.write(file_path, arcname)
 
     return send_file(zip_path, as_attachment=True)
-
-# ==============================
-# Admin Clear All
-# ==============================
-
-
-@app.route("/admin/clear_feedback")
-def clear_feedback():
-
-    key = request.args.get("key")
-    if key != ADMIN_SECRET:
-        abort(403)
-
-    for digit in range(10):
-        digit_folder = os.path.join(FEEDBACK_FOLDER, str(digit))
-        if os.path.exists(digit_folder):
-            for file in os.listdir(digit_folder):
-                file_path = os.path.join(digit_folder, file)
-                if os.path.isfile(file_path):
-                    os.remove(file_path)
-
-    return render_template("admin_success.html")
 
 # ==============================
 # Run
