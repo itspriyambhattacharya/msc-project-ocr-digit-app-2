@@ -1,18 +1,15 @@
 import os
 import uuid
 import shutil
-import zipfile
 import torch
 import torch.nn as nn
 from flask import (
     Flask,
     render_template,
     request,
-    send_file,
     redirect,
     send_from_directory,
-    session,
-    abort
+    session
 )
 from torchvision import transforms
 from PIL import Image, ImageOps
@@ -23,10 +20,10 @@ from werkzeug.security import generate_password_hash, check_password_hash
 # ==============================
 
 app = Flask(__name__)
-app.secret_key = "replace_this_with_long_random_secret_key_123456"
+app.secret_key = "replace_this_with_a_long_random_secret_key"
 
 # ==============================
-# Paths & Directories
+# Paths
 # ==============================
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -39,11 +36,11 @@ os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 for i in range(10):
     os.makedirs(os.path.join(FEEDBACK_FOLDER, str(i)), exist_ok=True)
 
-device = torch.device("cpu")
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 model = None
 
 # ==============================
-# ADMIN CONFIGURATION (SECURE)
+# ADMIN CONFIGURATION
 # ==============================
 
 ADMINS = {
@@ -65,13 +62,16 @@ ADMINS = {
 }
 
 # ==============================
-# Model Architecture
+# Model Architecture (IDENTICAL TO training.py)
 # ==============================
 
 
 class PriyamDigitNet(nn.Module):
-    def __init__(self):
+    def __init__(self, num_classes=10):
         super(PriyamDigitNet, self).__init__()
+
+        self.relu = nn.LeakyReLU(0.1)
+        self.pool = nn.MaxPool2d(2, 2)
 
         self.conv1 = nn.Conv2d(1, 32, 3, padding=1)
         self.bn1 = nn.BatchNorm2d(32)
@@ -82,20 +82,27 @@ class PriyamDigitNet(nn.Module):
         self.conv3 = nn.Conv2d(64, 128, 3, padding=1)
         self.bn3 = nn.BatchNorm2d(128)
 
-        self.pool = nn.MaxPool2d(2, 2)
-        self.relu = nn.ReLU()
-        self.dropout = nn.Dropout(0.4)
+        self.conv4 = nn.Conv2d(128, 256, 3, padding=1)
+        self.bn4 = nn.BatchNorm2d(256)
 
-        self.fc1 = nn.Linear(128 * 4 * 4, 512)
-        self.fc2 = nn.Linear(512, 10)
+        self.dropout_conv = nn.Dropout2d(0.3)
+        self.dropout_fc = nn.Dropout(0.5)
+
+        self.fc1 = nn.Linear(256 * 2 * 2, 256)
+        self.fc2 = nn.Linear(256, num_classes)
 
     def forward(self, x):
         x = self.pool(self.relu(self.bn1(self.conv1(x))))
         x = self.pool(self.relu(self.bn2(self.conv2(x))))
         x = self.pool(self.relu(self.bn3(self.conv3(x))))
-        x = x.view(-1, 128 * 4 * 4)
-        x = self.dropout(self.relu(self.fc1(x)))
+        x = self.pool(self.relu(self.bn4(self.conv4(x))))
+
+        x = self.dropout_conv(x)
+        x = x.view(x.size(0), -1)
+
+        x = self.dropout_fc(self.relu(self.fc1(x)))
         x = self.fc2(x)
+
         return x
 
 
@@ -118,7 +125,7 @@ def load_model():
 
 
 # ==============================
-# Prediction Function
+# Prediction
 # ==============================
 
 
@@ -127,6 +134,7 @@ def predict_digit(img_path):
 
     img = Image.open(img_path).convert("L")
 
+    # Same preprocessing as training
     if img.getpixel((0, 0)) > 120:
         img = ImageOps.invert(img)
 
@@ -220,7 +228,7 @@ def feedback():
 
 
 # ==============================
-# ADMIN AUTH
+# ADMIN LOGIN
 # ==============================
 
 
