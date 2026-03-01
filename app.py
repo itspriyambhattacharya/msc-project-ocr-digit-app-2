@@ -22,7 +22,7 @@ os.makedirs(FEEDBACK_FOLDER, exist_ok=True)
 # ================= MODEL =================
 
 
-class CNN(nn.Module):
+class PriyamDigitNet(nn.Module):
     def __init__(self, num_classes=10):
         super(PriyamDigitNet, self).__init__()
 
@@ -58,7 +58,7 @@ class CNN(nn.Module):
 
 
 device = torch.device("cpu")
-model = CNN()
+model = PriyamDigitNet()
 
 # SAFE MODEL LOADING
 if os.path.exists(MODEL_PATH):
