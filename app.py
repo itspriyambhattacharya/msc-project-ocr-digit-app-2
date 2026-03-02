@@ -1,41 +1,33 @@
 # =========================================
-# app.py (For Computer-Typed Digits)
+# app.py (Robust OCR Version - Centered Detection)
 # =========================================
 
 import os
 import uuid
-import shutil
-import zipfile
 import torch
 import torch.nn as nn
+import numpy as np
+import cv2
 from PIL import Image
 from torchvision import transforms
-from flask import (
-    Flask,
-    render_template,
-    request,
-    send_file,
-    abort
-)
+from flask import Flask, render_template, request
+
+# =========================================
+# Flask Setup
+# =========================================
 
 app = Flask(__name__)
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-ADMIN_SECRET = "password"
-
 UPLOAD_FOLDER = os.path.join(BASE_DIR, "static", "uploads")
-FEEDBACK_FOLDER = os.path.join(BASE_DIR, "data", "live_feedback")
-
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
-for i in range(10):
-    os.makedirs(os.path.join(FEEDBACK_FOLDER, str(i)), exist_ok=True)
 
 device = torch.device("cpu")
 model = None
 
-# ==============================
-# Same Model Architecture
-# ==============================
+# =========================================
+# Model Architecture (Must Match training.py)
+# =========================================
 
 
 class PriyamDigitNet(nn.Module):
@@ -72,21 +64,9 @@ class PriyamDigitNet(nn.Module):
 
         return x
 
-# ==============================
-# Transform (Must Match Training)
-# ==============================
-
-
-inference_tf = transforms.Compose([
-    transforms.Grayscale(num_output_channels=1),
-    transforms.Resize((32, 32)),
-    transforms.ToTensor(),
-    transforms.Normalize((0.5,), (0.5,))
-])
-
-# ==============================
+# =========================================
 # Load Model
-# ==============================
+# =========================================
 
 
 def load_model():
@@ -99,15 +79,69 @@ def load_model():
         )
         model.eval()
 
-# ==============================
+# =========================================
+# ROBUST PREPROCESSING FUNCTION
+# =========================================
+
+
+def preprocess_and_center(image):
+    """
+    1. Convert to grayscale
+    2. Detect digit region
+    3. Crop bounding box
+    4. Make square
+    5. Resize to 32x32
+    """
+
+    # Convert PIL to numpy grayscale
+    img = np.array(image.convert("L"))
+
+    # Threshold to isolate digit (white background assumed)
+    _, thresh = cv2.threshold(img, 200, 255, cv2.THRESH_BINARY_INV)
+
+    # Find non-zero pixels (digit region)
+    coords = cv2.findNonZero(thresh)
+
+    if coords is not None:
+        x, y, w, h = cv2.boundingRect(coords)
+        img = img[y:y+h, x:x+w]
+
+    # Make square canvas
+    size = max(img.shape)
+    square = np.ones((size, size), dtype=np.uint8) * 255
+
+    h, w = img.shape
+    square[(size-h)//2:(size-h)//2+h,
+           (size-w)//2:(size-w)//2+w] = img
+
+    # Resize to model input size
+    square = cv2.resize(square, (32, 32))
+
+    return Image.fromarray(square)
+
+# =========================================
+# Transform (Same as Training Normalization)
+# =========================================
+
+
+inference_tf = transforms.Compose([
+    transforms.ToTensor(),
+    transforms.Normalize((0.5,), (0.5,))
+])
+
+# =========================================
 # Prediction
-# ==============================
+# =========================================
 
 
 def predict_digit(img_path):
     load_model()
 
     image = Image.open(img_path)
+
+    # 🔥 Critical Step: Center Digit
+    image = preprocess_and_center(image)
+
     tensor = inference_tf(image).unsqueeze(0).to(device)
 
     with torch.no_grad():
@@ -117,9 +151,9 @@ def predict_digit(img_path):
 
     return pred.item(), round(conf.item() * 100, 2)
 
-# ==============================
+# =========================================
 # Routes
-# ==============================
+# =========================================
 
 
 @app.route("/", methods=["GET", "POST"])
@@ -152,9 +186,9 @@ def index():
         filename=filename
     )
 
-# ==============================
+# =========================================
 # Run
-# ==============================
+# =========================================
 
 
 if __name__ == "__main__":
