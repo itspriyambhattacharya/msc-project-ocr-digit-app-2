@@ -1,0 +1,39 @@
+<!doctype html>
+<html>
+  <head>
+    <title>Sudoku OCR</title>
+    <style>
+      table {
+        border-collapse: collapse;
+      }
+      td {
+        width: 40px;
+        height: 40px;
+        text-align: center;
+        font-size: 20px;
+        border: 1px solid black;
+      }
+    </style>
+  </head>
+  <body>
+    <h2>Upload Sudoku Image</h2>
+
+    <form method="POST" enctype="multipart/form-data">
+      <input type="file" name="file" />
+      <button type="submit">Upload</button>
+    </form>
+
+    {% if board %}
+    <h2>Detected Sudoku Board</h2>
+    <table>
+      {% for row in board %}
+      <tr>
+        {% for cell in row %}
+        <td>{{ cell }}</td>
+        {% endfor %}
+      </tr>
+      {% endfor %}
+    </table>
+    {% endif %}
+  </body>
+</html>

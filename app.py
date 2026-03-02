@@ -1,13 +1,13 @@
 # =========================================
-# app.py (Robust OCR Version - Centered Detection)
+# app.py (Sudoku OCR Phase 1)
 # =========================================
 
 import os
 import uuid
+import cv2
+import numpy as np
 import torch
 import torch.nn as nn
-import numpy as np
-import cv2
 from PIL import Image
 from torchvision import transforms
 from flask import Flask, render_template, request
@@ -26,12 +26,12 @@ device = torch.device("cpu")
 model = None
 
 # =========================================
-# Model Architecture (Must Match training.py)
+# Model Architecture (Same as training.py)
 # =========================================
 
 
 class PriyamDigitNet(nn.Module):
-    def __init__(self, num_classes=10):
+    def __init__(self):
         super().__init__()
 
         self.relu = nn.ReLU()
@@ -52,16 +52,12 @@ class PriyamDigitNet(nn.Module):
         self.fc2 = nn.Linear(256, 10)
 
     def forward(self, x):
-
         x = self.pool(self.relu(self.bn1(self.conv1(x))))
         x = self.pool(self.relu(self.bn2(self.conv2(x))))
         x = self.pool(self.relu(self.bn3(self.conv3(x))))
-
         x = x.view(x.size(0), -1)
-
         x = self.dropout(self.relu(self.fc1(x)))
         x = self.fc2(x)
-
         return x
 
 # =========================================
@@ -80,76 +76,88 @@ def load_model():
         model.eval()
 
 # =========================================
-# ROBUST PREPROCESSING FUNCTION
+# Digit Transform
 # =========================================
 
 
-def preprocess_and_center(image):
-    """
-    1. Convert to grayscale
-    2. Detect digit region
-    3. Crop bounding box
-    4. Make square
-    5. Resize to 32x32
-    """
-
-    # Convert PIL to numpy grayscale
-    img = np.array(image.convert("L"))
-
-    # Threshold to isolate digit (white background assumed)
-    _, thresh = cv2.threshold(img, 200, 255, cv2.THRESH_BINARY_INV)
-
-    # Find non-zero pixels (digit region)
-    coords = cv2.findNonZero(thresh)
-
-    if coords is not None:
-        x, y, w, h = cv2.boundingRect(coords)
-        img = img[y:y+h, x:x+w]
-
-    # Make square canvas
-    size = max(img.shape)
-    square = np.ones((size, size), dtype=np.uint8) * 255
-
-    h, w = img.shape
-    square[(size-h)//2:(size-h)//2+h,
-           (size-w)//2:(size-w)//2+w] = img
-
-    # Resize to model input size
-    square = cv2.resize(square, (32, 32))
-
-    return Image.fromarray(square)
-
-# =========================================
-# Transform (Same as Training Normalization)
-# =========================================
-
-
-inference_tf = transforms.Compose([
+digit_tf = transforms.Compose([
     transforms.ToTensor(),
     transforms.Normalize((0.5,), (0.5,))
 ])
 
 # =========================================
-# Prediction
+# Digit Classification
 # =========================================
 
 
-def predict_digit(img_path):
-    load_model()
+def classify_digit(cell_img):
 
-    image = Image.open(img_path)
-
-    # 🔥 Critical Step: Center Digit
-    image = preprocess_and_center(image)
-
-    tensor = inference_tf(image).unsqueeze(0).to(device)
+    cell_img = cv2.resize(cell_img, (32, 32))
+    pil_img = Image.fromarray(cell_img)
+    tensor = digit_tf(pil_img).unsqueeze(0).to(device)
 
     with torch.no_grad():
         output = model(tensor)
-        prob = torch.softmax(output, dim=1)
-        conf, pred = torch.max(prob, 1)
+        pred = torch.argmax(output, 1).item()
 
-    return pred.item(), round(conf.item() * 100, 2)
+    return pred
+
+# =========================================
+# Sudoku Processing
+# =========================================
+
+
+def process_sudoku(image_path):
+
+    load_model()
+
+    img = cv2.imread(image_path)
+    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+
+    blur = cv2.GaussianBlur(gray, (7, 7), 0)
+    thresh = cv2.adaptiveThreshold(
+        blur, 255,
+        cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
+        cv2.THRESH_BINARY_INV,
+        11, 2
+    )
+
+    contours, _ = cv2.findContours(
+        thresh, cv2.RETR_EXTERNAL,
+        cv2.CHAIN_APPROX_SIMPLE
+    )
+
+    largest = max(contours, key=cv2.contourArea)
+
+    x, y, w, h = cv2.boundingRect(largest)
+    grid = gray[y:y+h, x:x+w]
+
+    grid = cv2.resize(grid, (450, 450))
+
+    cell_size = 450 // 9
+
+    board = [[0 for _ in range(9)] for _ in range(9)]
+
+    for i in range(9):
+        for j in range(9):
+
+            y1 = i * cell_size
+            y2 = (i+1) * cell_size
+            x1 = j * cell_size
+            x2 = (j+1) * cell_size
+
+            cell = grid[y1:y2, x1:x2]
+
+            _, cell_thresh = cv2.threshold(
+                cell, 200, 255, cv2.THRESH_BINARY_INV
+            )
+
+            if cv2.countNonZero(cell_thresh) > 50:
+                board[i][j] = classify_digit(cell)
+            else:
+                board[i][j] = ""
+
+    return board
 
 # =========================================
 # Routes
@@ -159,32 +167,20 @@ def predict_digit(img_path):
 @app.route("/", methods=["GET", "POST"])
 def index():
 
-    prediction = None
-    confidence = None
-    img_url = None
-    filename = None
+    board = None
 
-    if request.method == "POST" and "file" in request.files:
+    if request.method == "POST":
 
         file = request.files["file"]
 
         if file.filename != "":
-            unique_name = str(uuid.uuid4()) + "_" + file.filename
-            filepath = os.path.join(UPLOAD_FOLDER, unique_name)
-            file.save(filepath)
+            filename = str(uuid.uuid4()) + "_" + file.filename
+            path = os.path.join(UPLOAD_FOLDER, filename)
+            file.save(path)
 
-            prediction, confidence = predict_digit(filepath)
+            board = process_sudoku(path)
 
-            img_url = f"static/uploads/{unique_name}"
-            filename = unique_name
-
-    return render_template(
-        "index.html",
-        prediction=prediction,
-        confidence=confidence,
-        image=img_url,
-        filename=filename
-    )
+    return render_template("sudoku.html", board=board)
 
 # =========================================
 # Run
