@@ -32,6 +32,12 @@ jobs:
         run: |
           git remote add hf https://itspriyambhattacharya:${HF_TOKEN}@huggingface.co/spaces/itspriyambhattacharya/DeepScan || true
 
+      # 🔥 THIS IS THE FIX
+      - name: Sync with Hugging Face
+        run: |
+          git fetch hf
+          git rebase hf/main || true
+
       - name: Push Model Update to Hugging Face
         run: |
           git push hf main
