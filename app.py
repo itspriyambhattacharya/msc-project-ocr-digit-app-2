@@ -1,5 +1,5 @@
 # =========================================
-# app.py (Sudoku OCR Phase 1)
+# Sudoku OCR (Proper Grid + Digit Extraction)
 # =========================================
 
 import os
@@ -76,45 +76,15 @@ def load_model():
         model.eval()
 
 # =========================================
-# Digit Transform
+# Perspective Correction
 # =========================================
 
 
-digit_tf = transforms.Compose([
-    transforms.ToTensor(),
-    transforms.Normalize((0.5,), (0.5,))
-])
+def warp_sudoku(image):
 
-# =========================================
-# Digit Classification
-# =========================================
-
-
-def classify_digit(cell_img):
-
-    cell_img = cv2.resize(cell_img, (32, 32))
-    pil_img = Image.fromarray(cell_img)
-    tensor = digit_tf(pil_img).unsqueeze(0).to(device)
-
-    with torch.no_grad():
-        output = model(tensor)
-        pred = torch.argmax(output, 1).item()
-
-    return pred
-
-# =========================================
-# Sudoku Processing
-# =========================================
-
-
-def process_sudoku(image_path):
-
-    load_model()
-
-    img = cv2.imread(image_path)
-    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-
+    gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
     blur = cv2.GaussianBlur(gray, (7, 7), 0)
+
     thresh = cv2.adaptiveThreshold(
         blur, 255,
         cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
@@ -129,14 +99,118 @@ def process_sudoku(image_path):
 
     largest = max(contours, key=cv2.contourArea)
 
-    x, y, w, h = cv2.boundingRect(largest)
-    grid = gray[y:y+h, x:x+w]
+    peri = cv2.arcLength(largest, True)
+    approx = cv2.approxPolyDP(largest, 0.02 * peri, True)
 
-    grid = cv2.resize(grid, (450, 450))
+    if len(approx) != 4:
+        return None
+
+    pts = approx.reshape(4, 2)
+
+    rect = np.zeros((4, 2), dtype="float32")
+
+    s = pts.sum(axis=1)
+    rect[0] = pts[np.argmin(s)]
+    rect[2] = pts[np.argmax(s)]
+
+    diff = np.diff(pts, axis=1)
+    rect[1] = pts[np.argmin(diff)]
+    rect[3] = pts[np.argmax(diff)]
+
+    dst = np.array([
+        [0, 0],
+        [450, 0],
+        [450, 450],
+        [0, 450]
+    ], dtype="float32")
+
+    M = cv2.getPerspectiveTransform(rect, dst)
+    warped = cv2.warpPerspective(gray, M, (450, 450))
+
+    return warped
+
+# =========================================
+# Extract Digit From Cell
+# =========================================
+
+
+def extract_digit(cell):
+
+    margin = 8
+    h, w = cell.shape
+    cell = cell[margin:h-margin, margin:w-margin]
+
+    thresh = cv2.threshold(
+        cell, 0, 255,
+        cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU
+    )[1]
+
+    contours, _ = cv2.findContours(
+        thresh, cv2.RETR_EXTERNAL,
+        cv2.CHAIN_APPROX_SIMPLE
+    )
+
+    if not contours:
+        return None
+
+    largest = max(contours, key=cv2.contourArea)
+
+    if cv2.contourArea(largest) < 40:
+        return None
+
+    x, y, w, h = cv2.boundingRect(largest)
+    digit = thresh[y:y+h, x:x+w]
+
+    size = max(w, h)
+    square = np.zeros((size, size), dtype=np.uint8)
+
+    square[(size-h)//2:(size-h)//2+h,
+           (size-w)//2:(size-w)//2+w] = digit
+
+    return square
+
+# =========================================
+# Classify Digit
+# =========================================
+
+
+digit_tf = transforms.Compose([
+    transforms.ToTensor(),
+    transforms.Normalize((0.5,), (0.5,))
+])
+
+
+def classify(digit_img):
+
+    digit_img = cv2.resize(digit_img, (32, 32))
+    pil = Image.fromarray(digit_img)
+    tensor = digit_tf(pil).unsqueeze(0).to(device)
+
+    with torch.no_grad():
+        output = model(tensor)
+        pred = torch.argmax(output, 1).item()
+
+    return pred
+
+# =========================================
+# Full Sudoku Processing
+# =========================================
+
+
+def process_sudoku(path):
+
+    load_model()
+
+    image = cv2.imread(path)
+
+    warped = warp_sudoku(image)
+
+    if warped is None:
+        return None
+
+    board = [["" for _ in range(9)] for _ in range(9)]
 
     cell_size = 450 // 9
-
-    board = [[0 for _ in range(9)] for _ in range(9)]
 
     for i in range(9):
         for j in range(9):
@@ -146,16 +220,12 @@ def process_sudoku(image_path):
             x1 = j * cell_size
             x2 = (j+1) * cell_size
 
-            cell = grid[y1:y2, x1:x2]
+            cell = warped[y1:y2, x1:x2]
 
-            _, cell_thresh = cv2.threshold(
-                cell, 200, 255, cv2.THRESH_BINARY_INV
-            )
+            digit_img = extract_digit(cell)
 
-            if cv2.countNonZero(cell_thresh) > 50:
-                board[i][j] = classify_digit(cell)
-            else:
-                board[i][j] = ""
+            if digit_img is not None:
+                board[i][j] = classify(digit_img)
 
     return board
 
