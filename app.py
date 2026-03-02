@@ -1,5 +1,5 @@
 # =========================================
-# Sudoku OCR (Proper Grid + Digit Extraction)
+# Sudoku OCR - Production Version (No Solver)
 # =========================================
 
 import os
@@ -12,10 +12,6 @@ from PIL import Image
 from torchvision import transforms
 from flask import Flask, render_template, request
 
-# =========================================
-# Flask Setup
-# =========================================
-
 app = Flask(__name__)
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -26,7 +22,7 @@ device = torch.device("cpu")
 model = None
 
 # =========================================
-# Model Architecture (Same as training.py)
+# Model Architecture (Must Match Training)
 # =========================================
 
 
@@ -34,35 +30,33 @@ class PriyamDigitNet(nn.Module):
     def __init__(self):
         super().__init__()
 
-        self.relu = nn.ReLU()
-        self.pool = nn.MaxPool2d(2, 2)
+        self.features = nn.Sequential(
+            nn.Conv2d(1, 32, 3, padding=1),
+            nn.BatchNorm2d(32),
+            nn.ReLU(),
+            nn.MaxPool2d(2),
 
-        self.conv1 = nn.Conv2d(1, 32, 3, padding=1)
-        self.bn1 = nn.BatchNorm2d(32)
+            nn.Conv2d(32, 64, 3, padding=1),
+            nn.BatchNorm2d(64),
+            nn.ReLU(),
+            nn.MaxPool2d(2),
 
-        self.conv2 = nn.Conv2d(32, 64, 3, padding=1)
-        self.bn2 = nn.BatchNorm2d(64)
+            nn.Conv2d(64, 128, 3, padding=1),
+            nn.BatchNorm2d(128),
+            nn.ReLU(),
+            nn.MaxPool2d(2),
+        )
 
-        self.conv3 = nn.Conv2d(64, 128, 3, padding=1)
-        self.bn3 = nn.BatchNorm2d(128)
-
-        self.dropout = nn.Dropout(0.4)
-
-        self.fc1 = nn.Linear(128 * 4 * 4, 256)
-        self.fc2 = nn.Linear(256, 10)
+        self.classifier = nn.Sequential(
+            nn.Flatten(),
+            nn.Linear(128 * 4 * 4, 256),
+            nn.ReLU(),
+            nn.Dropout(0.5),
+            nn.Linear(256, 10)
+        )
 
     def forward(self, x):
-        x = self.pool(self.relu(self.bn1(self.conv1(x))))
-        x = self.pool(self.relu(self.bn2(self.conv2(x))))
-        x = self.pool(self.relu(self.bn3(self.conv3(x))))
-        x = x.view(x.size(0), -1)
-        x = self.dropout(self.relu(self.fc1(x)))
-        x = self.fc2(x)
-        return x
-
-# =========================================
-# Load Model
-# =========================================
+        return self.classifier(self.features(x))
 
 
 def load_model():
@@ -76,7 +70,7 @@ def load_model():
         model.eval()
 
 # =========================================
-# Perspective Correction
+# Perspective Transform
 # =========================================
 
 
@@ -125,28 +119,46 @@ def warp_sudoku(image):
     ], dtype="float32")
 
     M = cv2.getPerspectiveTransform(rect, dst)
-    warped = cv2.warpPerspective(gray, M, (450, 450))
-
-    return warped
+    return cv2.warpPerspective(gray, M, (450, 450))
 
 # =========================================
-# Extract Digit From Cell
+# Remove Grid Lines
+# =========================================
+
+
+def remove_grid_lines(img):
+
+    thresh = cv2.adaptiveThreshold(
+        img, 255,
+        cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
+        cv2.THRESH_BINARY_INV,
+        11, 2
+    )
+
+    horizontal_kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (40, 1))
+    remove_horizontal = cv2.morphologyEx(
+        thresh, cv2.MORPH_OPEN, horizontal_kernel)
+
+    vertical_kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (1, 40))
+    remove_vertical = cv2.morphologyEx(thresh, cv2.MORPH_OPEN, vertical_kernel)
+
+    grid = remove_horizontal + remove_vertical
+    cleaned = cv2.subtract(thresh, grid)
+
+    return cleaned
+
+# =========================================
+# Extract Digit
 # =========================================
 
 
 def extract_digit(cell):
 
-    margin = 8
-    h, w = cell.shape
-    cell = cell[margin:h-margin, margin:w-margin]
-
-    thresh = cv2.threshold(
-        cell, 0, 255,
-        cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU
-    )[1]
+    margin = 10
+    cell = cell[margin:-margin, margin:-margin]
 
     contours, _ = cv2.findContours(
-        thresh, cv2.RETR_EXTERNAL,
+        cell, cv2.RETR_EXTERNAL,
         cv2.CHAIN_APPROX_SIMPLE
     )
 
@@ -155,11 +167,11 @@ def extract_digit(cell):
 
     largest = max(contours, key=cv2.contourArea)
 
-    if cv2.contourArea(largest) < 40:
+    if cv2.contourArea(largest) < 80:
         return None
 
     x, y, w, h = cv2.boundingRect(largest)
-    digit = thresh[y:y+h, x:x+w]
+    digit = cell[y:y+h, x:x+w]
 
     size = max(w, h)
     square = np.zeros((size, size), dtype=np.uint8)
@@ -170,7 +182,7 @@ def extract_digit(cell):
     return square
 
 # =========================================
-# Classify Digit
+# Classify
 # =========================================
 
 
@@ -188,12 +200,16 @@ def classify(digit_img):
 
     with torch.no_grad():
         output = model(tensor)
-        pred = torch.argmax(output, 1).item()
+        prob = torch.softmax(output, dim=1)
+        conf, pred = torch.max(prob, 1)
 
-    return pred
+    if conf.item() < 0.75:
+        return ""
+
+    return pred.item()
 
 # =========================================
-# Full Sudoku Processing
+# Full Pipeline
 # =========================================
 
 
@@ -202,14 +218,14 @@ def process_sudoku(path):
     load_model()
 
     image = cv2.imread(path)
-
     warped = warp_sudoku(image)
 
     if warped is None:
         return None
 
-    board = [["" for _ in range(9)] for _ in range(9)]
+    cleaned = remove_grid_lines(warped)
 
+    board = [["" for _ in range(9)] for _ in range(9)]
     cell_size = 450 // 9
 
     for i in range(9):
@@ -220,7 +236,7 @@ def process_sudoku(path):
             x1 = j * cell_size
             x2 = (j+1) * cell_size
 
-            cell = warped[y1:y2, x1:x2]
+            cell = cleaned[y1:y2, x1:x2]
 
             digit_img = extract_digit(cell)
 
@@ -251,10 +267,6 @@ def index():
             board = process_sudoku(path)
 
     return render_template("sudoku.html", board=board)
-
-# =========================================
-# Run
-# =========================================
 
 
 if __name__ == "__main__":
