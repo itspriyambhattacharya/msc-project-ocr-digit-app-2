@@ -214,7 +214,3 @@ data/
 static/uploads
 
 static/admins
-
-generate_dataset.py
-
-fonts/
