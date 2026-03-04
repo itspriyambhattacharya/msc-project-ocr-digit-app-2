@@ -59,7 +59,9 @@ def train_model():
     scaler = torch.amp.GradScaler('cuda', enabled=(device.type == 'cuda'))
 
     best_acc = 0
-    for epoch in range(60):
+    epoches = 100
+    print(f"Total Number of Epoches: {epoches}")
+    for epoch in range(epoches):
         model.train()
         total_loss = 0
         for imgs, labels in train_loader:
