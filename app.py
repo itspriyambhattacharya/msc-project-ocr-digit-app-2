@@ -7,38 +7,37 @@ from utils import get_transforms
 from training import PriyamDigitNet
 
 app = Flask(__name__)
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+device = torch.device("cpu")
 
-# Paths
 UPLOAD_FOLDER = os.path.join("static", "uploads")
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 
-# Load Model Once at Startup
+# Load custom model
 model = PriyamDigitNet().to(device)
-if os.path.exists("digit_model.pth"):
-    model.load_state_dict(torch.load("digit_model.pth", map_location=device))
-model.eval()
+MODEL_PATH = "digit_model.pth"
 
-# Shared Transform
+if os.path.exists(MODEL_PATH):
+    model.load_state_dict(torch.load(MODEL_PATH, map_location=device))
+    print(f"Model loaded from {MODEL_PATH}")
+else:
+    print("Warning: digit_model.pth not found. Please run training.py first.")
+
+model.eval()
 inference_transform = get_transforms(train=False)
 
 
 @app.route("/", methods=["GET", "POST"])
 def index():
-    prediction = None
-    confidence = None
-    img_url = None
-    filename = None
+    prediction, confidence, img_url = None, None, None
 
     if request.method == "POST" and "file" in request.files:
         file = request.files["file"]
-        if file.filename != "":
+        if file and file.filename != "":
             filename = f"{uuid.uuid4()}_{file.filename}"
             filepath = os.path.join(UPLOAD_FOLDER, filename)
             file.save(filepath)
 
-            # Inference
-            img = Image.open(filepath).convert("L")
+            img = Image.open(filepath)
             tensor = inference_transform(img).unsqueeze(0).to(device)
 
             with torch.no_grad():
@@ -50,13 +49,7 @@ def index():
                 confidence = round(conf.item() * 100, 2)
                 img_url = f"static/uploads/{filename}"
 
-    return render_template(
-        "index.html",
-        prediction=prediction,
-        confidence=confidence,
-        image=img_url,
-        filename=filename
-    )
+    return render_template("index.html", prediction=prediction, confidence=confidence, image=img_url)
 
 
 if __name__ == "__main__":
