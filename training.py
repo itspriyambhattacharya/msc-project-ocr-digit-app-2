@@ -55,7 +55,7 @@ def train_model():
     model = PriyamDigitNet()
     criterion = nn.CrossEntropyLoss(label_smoothing=0.1)
     optimizer = optim.AdamW(model.parameters(), lr=1e-3, weight_decay=0.1)
-    epochs = 150
+    epochs = 30
     scheduler = optim.lr_scheduler.OneCycleLR(
         optimizer, max_lr=1e-3, steps_per_epoch=len(train_loader), epochs=epochs)
 
